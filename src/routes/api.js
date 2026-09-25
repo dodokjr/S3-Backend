@@ -601,38 +601,35 @@ router.get('/sales', async (req, res) => {
 // Tambah Data Sales (POST)
 router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
-    const { Deskripsi, Costumer, tgl, status } = req.body;
+    const { Deskripsi, Costumer, tgl, status, satuan, jumlah, nama_seles } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
-    const nameSeles = req.body.nama_seles;
-    
-    // Ambil input dari berbagai variasi penulisan key
-    const rawPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
-    const rawPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
-    const rawKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
 
-    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl || !nameSeles) {
+    // Validasi field utama
+    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl || !nama_seles || !satuan || jumlah === undefined) {
       return res.status(400).json({
         success: false,
-        message: 'Deskripsi, harga jual, harga beli, tgl, dan nama_seles wajib diisi!',
+        message: 'Deskripsi, harga jual, harga beli, tgl, nama_seles, satuan, dan jumlah wajib diisi!',
       });
     }
 
-    // Tentukan nilai Pcs, Pack, Kilogram secara eksklusif (jika diisi salah satu, yang lain otomatis 0)
+    // Logika penentuan Pcs, Pack, dan Kilogram berdasarkan "satuan" dan "jumlah"
     let finalPcs = '0';
     let finalPack = '0';
     let finalKilogram = '0';
 
-    if (rawPcs !== undefined && rawPcs !== null && rawPcs !== '' && Number(rawPcs) !== 0) {
-      finalPcs = rawPcs;
-    } else if (rawPack !== undefined && rawPack !== null && rawPack !== '' && Number(rawPack) !== 0) {
-      finalPack = rawPack;
-    } else if (rawKg !== undefined && rawKg !== null && rawKg !== '' && Number(rawKg) !== 0) {
-      finalKilogram = rawKg;
+    const normalizedSatuan = satuan.trim().toLowerCase();
+
+    if (normalizedSatuan === 'pcs') {
+      finalPcs = jumlah;
+    } else if (normalizedSatuan === 'pack') {
+      finalPack = jumlah;
+    } else if (normalizedSatuan === 'kilogram' || normalizedSatuan === 'kg') {
+      finalKilogram = jumlah;
     } else {
       return res.status(400).json({
         success: false,
-        message: 'Anda harus mengisi salah satu satuan (Pcs, Pack, atau Kilogram) dengan nilai yang valid!',
+        message: 'Satuan tidak valid! Gunakan Pcs, Pack, atau Kilogram.',
       });
     }
 
@@ -656,7 +653,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const newId = (maxId + 1).toString();
     const finalStatus = status || 'success';
 
-    // Urutan kolom: id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram
+    // Urutan kolom di Google Sheets: id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Sales!A:K',
@@ -670,7 +667,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
           hargaBeli, 
           tgl, 
           finalStatus, 
-          nameSeles, 
+          nama_seles, 
           finalPcs, 
           finalPack, 
           finalKilogram
@@ -689,7 +686,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         'harga beli': hargaBeli,
         tgl,
         status: finalStatus,
-        nama_seles: nameSeles,
+        nama_seles,
         Pcs: finalPcs,
         Pack: finalPack,
         Kilogram: finalKilogram
@@ -704,14 +701,9 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
 // Update Data Sales (PUT)
 router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
-    const { id, Deskripsi, Costumer, tgl, status } = req.body;
+    const { id, Deskripsi, Costumer, tgl, status, satuan, jumlah, nama_seles } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
-    const nameSeles = req.body.nama_seles;
-    
-    const rawPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
-    const rawPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
-    const rawKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
 
     if (!id) return res.status(400).json({ success: false, message: 'id wajib disertakan untuk update sales.' });
 
@@ -746,24 +738,30 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
       return -1;
     };
 
-    // Logika Update Satuan: 
-    // Jika salah satu satuan diisi, maka satuan itu diisi angkanya dan yang lain otomatis '0'. 
-    // Jika tidak ada input satuan yang dikirim saat update, gunakan nilai lama dari database.
+    // Logika Update Satuan berdasarkan input satuan & jumlah baru
     let finalPcs, finalPack, finalKilogram;
 
-    if (rawPcs !== undefined && rawPcs !== '') {
-      finalPcs = rawPcs;
-      finalPack = '0';
-      finalKilogram = '0';
-    } else if (rawPack !== undefined && rawPack !== '') {
-      finalPcs = '0';
-      finalPack = rawPack;
-      finalKilogram = '0';
-    } else if (rawKg !== undefined && rawKg !== '') {
-      finalPcs = '0';
-      finalPack = '0';
-      finalKilogram = rawKg;
+    if (satuan !== undefined && jumlah !== undefined) {
+      const normalizedSatuan = satuan.trim().toLowerCase();
+      if (normalizedSatuan === 'pcs') {
+        finalPcs = jumlah;
+        finalPack = '0';
+        finalKilogram = '0';
+      } else if (normalizedSatuan === 'pack') {
+        finalPcs = '0';
+        finalPack = jumlah;
+        finalKilogram = '0';
+      } else if (normalizedSatuan === 'kilogram' || normalizedSatuan === 'kg') {
+        finalPcs = '0';
+        finalPack = '0';
+        finalKilogram = jumlah;
+      } else {
+        finalPcs = oldRow[getColIdx(['pcs'])];
+        finalPack = oldRow[getColIdx(['pack'])];
+        finalKilogram = oldRow[getColIdx(['kilogram', 'kg'])];
+      }
     } else {
+      // Jika satuan/jumlah tidak dikirim saat update, gunakan nilai lama di database
       finalPcs = oldRow[getColIdx(['pcs'])];
       finalPack = oldRow[getColIdx(['pack'])];
       finalKilogram = oldRow[getColIdx(['kilogram', 'kg'])];
@@ -777,7 +775,7 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
       hargaBeli !== undefined ? hargaBeli : oldRow[getColIdx(['harga beli', 'hargabeli'])],
       tgl !== undefined ? tgl : oldRow[getColIdx(['tgl'])],
       status !== undefined ? status : oldRow[getColIdx(['status'])],
-      nameSeles !== undefined ? nameSeles : oldRow[getColIdx(['nama_seles', 'name_seles', 'namaseles'])],
+      nama_seles !== undefined ? nama_seles : oldRow[getColIdx(['nama_seles', 'name_seles', 'namaseles'])],
       finalPcs,
       finalPack,
       finalKilogram,
