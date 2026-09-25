@@ -41,21 +41,50 @@ router.get('/users', verifyToken, async (req, res) => {
 });
 
 // Tambah User Baru (Hanya Developer & Admin)
+// Tambah User Baru (Hanya Developer & Admin)
 router.post('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
   try {
     const { name, email, password, role, is_login } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({ success: false, message: 'Nama dan Email wajib diisi!' });
+    }
+
     const sheets = await getSheetClient();
+
+    // Ambil data yang sudah ada untuk menentukan id berikutnya (auto-increment).
+    // Kolom A sekarang berisi id, sehingga range diperluas dari A:E menjadi A:F.
+    const existingResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Users!A:F',
+    });
+
+    const rows = existingResponse.data.values || [];
+    const dataRows = rows.slice(1); // lewati baris header
+
+    let maxId = 0;
+    dataRows.forEach((row) => {
+      const idNumber = Number(row[0]);
+      if (!Number.isNaN(idNumber) && idNumber > maxId) {
+        maxId = idNumber;
+      }
+    });
+    const newId = (maxId + 1).toString();
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Users!A:E',
+      range: 'Users!A:F',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[name, email, password, role || 'karyawan', is_login || false]]
+        values: [[newId, name, email, password || '', role || 'karyawan', is_login || false]]
       }
     });
 
-    res.json({ success: true, message: 'User berhasil ditambahkan!' });
+    res.json({
+      success: true,
+      message: 'User berhasil ditambahkan!',
+      data: { id: newId, name, email, role: role || 'karyawan', status: is_login ? 'TRUE' : 'FALSE' }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: error.message });
@@ -71,7 +100,7 @@ router.put('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Users!A:E',
+      range: 'Users!A:F', // PERBAIKAN: A:E -> A:F karena kolom id ditambahkan di posisi A
     });
 
     const rows = response.data.values;
@@ -91,7 +120,10 @@ router.put('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     if (rowIndex === -1) return res.status(404).json({ success: false, message: 'User tidak ditemukan.' });
 
     const oldRow = rows[rowIndex - 1];
+    // PERBAIKAN: id (kolom pertama) dipertahankan apa adanya dari baris lama —
+    // id tidak boleh berubah saat update, hanya field lain yang bisa diperbarui.
     const updatedRow = [
+      oldRow[headers.indexOf('id')],
       name !== undefined ? name : oldRow[headers.indexOf('name')],
       email,
       password !== undefined ? password : oldRow[headers.indexOf('password')],
@@ -101,7 +133,7 @@ router.put('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Users!A${rowIndex}:E${rowIndex}`,
+      range: `Users!A${rowIndex}:F${rowIndex}`, // PERBAIKAN: A:E -> A:F
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [updatedRow] }
     });
@@ -122,7 +154,7 @@ router.delete('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Users!A:E',
+      range: 'Users!A:F', // PERBAIKAN: A:E -> A:F
     });
 
     const rows = response.data.values;
@@ -166,7 +198,6 @@ router.delete('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
 
 // ==========================================
 // 2. ENDPOINT REAL STOCK
