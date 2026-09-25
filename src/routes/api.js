@@ -605,9 +605,11 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
     const nameSeles = req.body.nama_seles;
-    const Pcs = req.body.Pcs;
-    const Pack = req.body.Pack;
-    const Kilogram = req.body.Kilogram;
+    
+    // Menangkap input dari berbagai kemungkinan penulisan key dari frontend
+    const inputPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
+    const inputPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
+    const inputKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
 
     if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl || !nameSeles) {
       return res.status(400).json({
@@ -615,6 +617,23 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         message: 'Deskripsi, harga jual, harga beli, tgl, dan nama_seles wajib diisi!',
       });
     }
+
+    // Validasi: Harus mengisi salah satu saja (Pcs, Pack, atau Kilogram)
+    const hasPcs = inputPcs !== undefined && inputPcs !== null && inputPcs !== '' && Number(inputPcs) > 0;
+    const hasPack = inputPack !== undefined && inputPack !== null && inputPack !== '' && Number(inputPack) > 0;
+    const hasKg = inputKg !== undefined && inputKg !== null && inputKg !== '' && Number(inputKg) > 0;
+
+    if (!hasPcs && !hasPack && !hasKg) {
+      return res.status(400).json({
+        success: false,
+        message: 'Anda harus mengisi salah satu satuan: Pcs, Pack, atau Kilogram!',
+      });
+    }
+
+    // Logika Eksklusif: Hanya isi kolom yang diinput user, sisanya '0'
+    const finalPcs = hasPcs ? inputPcs : '0';
+    const finalPack = hasPack ? inputPack : '0';
+    const finalKilogram = hasKg ? inputKg : '0';
 
     const sheets = await getSheetClient();
 
@@ -651,9 +670,9 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
           tgl, 
           finalStatus, 
           nameSeles, 
-          Pcs !== undefined ? Pcs : '0', 
-          Pack !== undefined ? Pack : '0', 
-          Kilogram !== undefined ? Kilogram : '0'
+          finalPcs, 
+          finalPack, 
+          finalKilogram
         ]]
       }
     });
@@ -670,9 +689,9 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         tgl,
         status: finalStatus,
         nama_seles: nameSeles,
-        Pcs: Pcs !== undefined ? Pcs : '0',
-        Pack: Pack !== undefined ? Pack : '0',
-        Kilogram: Kilogram !== undefined ? Kilogram : '0'
+        Pcs: finalPcs,
+        Pack: finalPack,
+        Kilogram: finalKilogram
       }
     });
   } catch (error) {
@@ -681,16 +700,17 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
   }
 });
 
-// Update Data Sales (Developer, Admin, Sales) - Bisa update parsial (misal hanya kirim Pcs/Pack/Kilogram saja)
+// Update Data Sales (Developer, Admin, Sales) - Update satuan yang diketik saja
 router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
     const { id, Deskripsi, Costumer, tgl, status } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
     const nameSeles = req.body.nama_seles;
-    const Pcs = req.body.Pcs;
-    const Pack = req.body.Pack;
-    const Kilogram = req.body.Kilogram;
+    
+    const inputPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
+    const inputPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
+    const inputKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
 
     if (!id) return res.status(400).json({ success: false, message: 'id wajib disertakan untuk update sales.' });
 
@@ -717,21 +737,51 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
     if (rowIndex === -1) return res.status(404).json({ success: false, message: 'Data sales dengan id tersebut tidak ditemukan.' });
 
     const oldRow = rows[rowIndex - 1];
-    const getColIdx = (name) => headers.indexOf(name.toLowerCase());
+    const getColIdx = (names) => {
+      for (let name of names) {
+        const idx = headers.indexOf(name.toLowerCase());
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
 
-    // Mempertahankan nilai lama jika field tidak dikirim di req.body
+    // Logika Update Satuan: 
+    // Jika user mengirimkan salah satu satuan (misal Pcs), maka Pcs di-update, 
+    // sementara Pack & Kilogram otomatis diset '0' (atau bisa diatur mempertahankan nilai lama jika diinginkan).
+    // Berdasarkan permintaan "jika user ketik 1 pcs maka yang update 1 pcs ... dan seterusnya":
+    let finalPcs, finalPack, finalKilogram;
+
+    if (inputPcs !== undefined) {
+      finalPcs = inputPcs;
+      finalPack = '0';
+      finalKilogram = '0';
+    } else if (inputPack !== undefined) {
+      finalPcs = '0';
+      finalPack = inputPack;
+      finalKilogram = '0';
+    } else if (inputKg !== undefined) {
+      finalPcs = '0';
+      finalPack = '0';
+      finalKilogram = inputKg;
+    } else {
+      // Jika tidak ada input satuan yang dikirim di request update, gunakan nilai lama
+      finalPcs = oldRow[getColIdx(['pcs'])];
+      finalPack = oldRow[getColIdx(['pack'])];
+      finalKilogram = oldRow[getColIdx(['kilogram', 'kg'])];
+    }
+
     const updatedRow = [
       id,
-      Deskripsi !== undefined ? Deskripsi : oldRow[getColIdx('deskripsi')],
-      Costumer !== undefined ? Costumer : oldRow[getColIdx('costumer')],
-      hargaJual !== undefined ? hargaJual : oldRow[getColIdx('harga jual')],
-      hargaBeli !== undefined ? hargaBeli : oldRow[getColIdx('harga beli')],
-      tgl !== undefined ? tgl : oldRow[getColIdx('tgl')],
-      status !== undefined ? status : oldRow[getColIdx('status')],
-      nameSeles !== undefined ? nameSeles : oldRow[getColIdx('nama_seles')],
-      Pcs !== undefined ? Pcs : oldRow[getColIdx('pcs')],
-      Pack !== undefined ? Pack : oldRow[getColIdx('pack')],
-      Kilogram !== undefined ? Kilogram : oldRow[getColIdx('kilogram')],
+      Deskripsi !== undefined ? Deskripsi : oldRow[getColIdx(['deskripsi'])],
+      Costumer !== undefined ? Costumer : oldRow[getColIdx(['costumer', 'customer'])],
+      hargaJual !== undefined ? hargaJual : oldRow[getColIdx(['harga jual', 'hargajual'])],
+      hargaBeli !== undefined ? hargaBeli : oldRow[getColIdx(['harga beli', 'hargabeli'])],
+      tgl !== undefined ? tgl : oldRow[getColIdx(['tgl'])],
+      status !== undefined ? status : oldRow[getColIdx(['status'])],
+      nameSeles !== undefined ? nameSeles : oldRow[getColIdx(['nama_seles', 'name_seles', 'namaseles'])],
+      finalPcs,
+      finalPack,
+      finalKilogram,
     ];
 
     await sheets.spreadsheets.values.update({
