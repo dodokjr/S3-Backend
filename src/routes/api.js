@@ -567,11 +567,8 @@ router.delete('/finance', verifyToken, checkModuleAccess('finance'), async (req,
 // ==========================================
 // 4. ENDPOINT SALES
 // ==========================================
-// PERBAIKAN: struktur disesuaikan dengan data asli yang dipakai frontend:
-// Sheet 'Sales' (A:G): id | Deskripsi | Costumer | harga jual | harga beli | tgl | status
-// (perhatikan: "Costumer" bukan "Customer", dan "harga jual"/"harga beli"
-// mengandung spasi, jadi diakses via req.body['harga jual'] dst.)
 
+// GET Data Sales
 router.get('/sales', async (req, res) => {
   try {
     const sheets = await getSheetClient();
@@ -604,21 +601,28 @@ router.get('/sales', async (req, res) => {
 // Tambah Data Sales (Developer, Admin, Sales)
 router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
-    const Deskripsi = req.body.Deskripsi;
-    const Costumer = req.body.Costumer;
+    const { Deskripsi, Costumer, tgl, status } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
-    const tgl = req.body.tgl;
     const nameSeles = req.body.nama_seles;
     const Pcs = req.body.Pcs;
     const Pack = req.body.Pack;
     const Kilogram = req.body.Kilogram;
-    const status = req.body.status;
 
-    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl  || !nameSeles === undefined || !Pcs === undefined || !Pack === undefined || !Kilogram === undefined ) {
+    // Validasi input wajib
+    if (
+      !Deskripsi || 
+      hargaJual === undefined || 
+      hargaBeli === undefined || 
+      !tgl || 
+      !nameSeles || 
+      Pcs === undefined || 
+      Pack === undefined || 
+      Kilogram === undefined
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Deskripsi, harga jual, harga beli, tgl,name , pcs, pack, dan kilogram wajib diisi!',
+        message: 'Deskripsi, harga jual, harga beli, tgl, nama seles, pcs, pack, dan kilogram wajib diisi!',
       });
     }
 
@@ -642,12 +646,13 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const newId = (maxId + 1).toString();
     const finalStatus = status || 'success';
 
+    // Urutan kolom: id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Sales!A:K',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus ,nameSeles, Pcs, Pack, Kilogram]]
+        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus, nameSeles, Pcs, Pack, Kilogram]]
       }
     });
 
@@ -662,10 +667,10 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         'harga beli': hargaBeli,
         tgl,
         status: finalStatus,
-        name_seles: nameSeles,
-        pcs: Pcs,
-        Pack: Pack,
-        KG: Kilogram
+        nama_seles: nameSeles,
+        Pcs,
+        Pack,
+        Kilogram
       }
     });
   } catch (error) {
@@ -677,26 +682,26 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
 // Update Data Sales (Developer, Admin, Sales)
 router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
-    const id = req.body.id;
-    const Deskripsi = req.body.Deskripsi;
-    const Costumer = req.body.Costumer;
+    const { id, Deskripsi, Costumer, tgl, status } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
-    const tgl = req.body.tgl;
-    const status = req.body.status;
+    const nameSeles = req.body.nama_seles;
+    const Pcs = req.body.Pcs;
+    const Pack = req.body.Pack;
+    const Kilogram = req.body.Kilogram;
 
     if (!id) return res.status(400).json({ success: false, message: 'id wajib disertakan untuk update sales.' });
 
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:H',
+      range: 'Sales!A:K',
     });
 
     const rows = response.data.values;
     if (!rows || rows.length <= 1) return res.status(404).json({ success: false, message: 'Data sales kosong.' });
 
-    const headers = rows[0].map(h => h.trim());
+    const headers = rows[0].map(h => h.trim().toLowerCase());
     let rowIndex = -1;
 
     for (let i = 1; i < rows.length; i++) {
@@ -710,19 +715,27 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
     if (rowIndex === -1) return res.status(404).json({ success: false, message: 'Data sales dengan id tersebut tidak ditemukan.' });
 
     const oldRow = rows[rowIndex - 1];
+    
+    // Mapping indeks header asli secara fleksibel berdasarkan baris pertama spreadsheet
+    const getColIdx = (name) => headers.indexOf(name.toLowerCase());
+
     const updatedRow = [
       id,
-      Deskripsi !== undefined ? Deskripsi : oldRow[headers.indexOf('Deskripsi')],
-      Costumer !== undefined ? Costumer : oldRow[headers.indexOf('Costumer')],
-      hargaJual !== undefined ? hargaJual : oldRow[headers.indexOf('harga jual')],
-      hargaBeli !== undefined ? hargaBeli : oldRow[headers.indexOf('harga beli')],
-      tgl !== undefined ? tgl : oldRow[headers.indexOf('tgl')],
-      status !== undefined ? status : oldRow[headers.indexOf('status')],
+      Deskripsi !== undefined ? Deskripsi : oldRow[getColIdx('deskripsi')],
+      Costumer !== undefined ? Costumer : oldRow[getColIdx('costumer')],
+      hargaJual !== undefined ? hargaJual : oldRow[getColIdx('harga jual')],
+      hargaBeli !== undefined ? hargaBeli : oldRow[getColIdx('harga beli')],
+      tgl !== undefined ? tgl : oldRow[getColIdx('tgl')],
+      status !== undefined ? status : oldRow[getColIdx('status')],
+      nameSeles !== undefined ? nameSeles : oldRow[getColIdx('nama_seles')],
+      Pcs !== undefined ? Pcs : oldRow[getColIdx('pcs')],
+      Pack !== undefined ? Pack : oldRow[getColIdx('pack')],
+      Kilogram !== undefined ? Kilogram : oldRow[getColIdx('kilogram')],
     ];
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Sales!A${rowIndex}:G${rowIndex}`,
+      range: `Sales!A\({rowIndex}:K\){rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [updatedRow] }
     });
@@ -749,7 +762,7 @@ router.delete('/sales', verifyToken, checkModuleAccess('sales'), async (req, res
     const rows = response.data.values;
     if (!rows || rows.length <= 1) return res.status(404).json({ success: false, message: 'Data sales kosong.' });
 
-    const headers = rows[0].map(h => h.trim());
+    const headers = rows[0].map(h => h.trim().toLowerCase());
     let rowIndex = -1;
 
     for (let i = 1; i < rows.length; i++) {
