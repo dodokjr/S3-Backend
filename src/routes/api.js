@@ -577,7 +577,7 @@ router.get('/sales', async (req, res) => {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:H',
+      range: 'Sales!A:K',
     });
 
     const rows = response.data.values;
@@ -609,12 +609,16 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
     const tgl = req.body.tgl;
+    const nameSeles = req.body.nama_seles;
+    const Pcs = req.body.Pcs;
+    const Pack = req.body.Pack;
+    const Kilogram = req.body.Kilogram;
     const status = req.body.status;
 
-    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl) {
+    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl  || !nameSeles === undefined || !Pcs === undefined || !Pack === undefined || !Kilogram === undefined ) {
       return res.status(400).json({
         success: false,
-        message: 'Deskripsi, harga jual, harga beli, dan tgl wajib diisi!',
+        message: 'Deskripsi, harga jual, harga beli, tgl,name , pcs, pack, dan kilogram wajib diisi!',
       });
     }
 
@@ -622,7 +626,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
 
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:G',
+      range: 'Sales!A:K',
     });
 
     const rows = existingResponse.data.values || [];
@@ -640,10 +644,10 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:H',
+      range: 'Sales!A:K',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus, nameSeles]]
+        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus ,nameSeles, Pcs, Pack, Kilogram]]
       }
     });
 
@@ -658,7 +662,10 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         'harga beli': hargaBeli,
         tgl,
         status: finalStatus,
-        name_seles: nameSeles
+        name_seles: nameSeles,
+        pcs: Pcs,
+        Pack: Pack,
+        KG: Kilogram
       }
     });
   } catch (error) {
@@ -736,7 +743,7 @@ router.delete('/sales', verifyToken, checkModuleAccess('sales'), async (req, res
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:H',
+      range: 'Sales!A:K',
     });
 
     const rows = response.data.values;
