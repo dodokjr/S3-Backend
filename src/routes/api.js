@@ -609,20 +609,10 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const Pack = req.body.Pack;
     const Kilogram = req.body.Kilogram;
 
-    // Validasi input wajib
-    if (
-      !Deskripsi || 
-      hargaJual === undefined || 
-      hargaBeli === undefined || 
-      !tgl || 
-      !nameSeles || 
-      Pcs === undefined || 
-      Pack === undefined || 
-      Kilogram === undefined
-    ) {
+    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl || !nameSeles) {
       return res.status(400).json({
         success: false,
-        message: 'Deskripsi, harga jual, harga beli, tgl, nama seles, pcs, pack, dan kilogram wajib diisi!',
+        message: 'Deskripsi, harga jual, harga beli, tgl, dan nama_seles wajib diisi!',
       });
     }
 
@@ -652,7 +642,19 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
       range: 'Sales!A:K',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus, nameSeles, Pcs, Pack, Kilogram]]
+        values: [[
+          newId, 
+          Deskripsi, 
+          Costumer || '', 
+          hargaJual, 
+          hargaBeli, 
+          tgl, 
+          finalStatus, 
+          nameSeles, 
+          Pcs !== undefined ? Pcs : '0', 
+          Pack !== undefined ? Pack : '0', 
+          Kilogram !== undefined ? Kilogram : '0'
+        ]]
       }
     });
 
@@ -668,9 +670,9 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         tgl,
         status: finalStatus,
         nama_seles: nameSeles,
-        Pcs,
-        Pack,
-        Kilogram
+        Pcs: Pcs !== undefined ? Pcs : '0',
+        Pack: Pack !== undefined ? Pack : '0',
+        Kilogram: Kilogram !== undefined ? Kilogram : '0'
       }
     });
   } catch (error) {
@@ -679,7 +681,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
   }
 });
 
-// Update Data Sales (Developer, Admin, Sales)
+// Update Data Sales (Developer, Admin, Sales) - Bisa update parsial (misal hanya kirim Pcs/Pack/Kilogram saja)
 router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
     const { id, Deskripsi, Costumer, tgl, status } = req.body;
@@ -715,10 +717,9 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
     if (rowIndex === -1) return res.status(404).json({ success: false, message: 'Data sales dengan id tersebut tidak ditemukan.' });
 
     const oldRow = rows[rowIndex - 1];
-    
-    // Mapping indeks header asli secara fleksibel berdasarkan baris pertama spreadsheet
     const getColIdx = (name) => headers.indexOf(name.toLowerCase());
 
+    // Mempertahankan nilai lama jika field tidak dikirim di req.body
     const updatedRow = [
       id,
       Deskripsi !== undefined ? Deskripsi : oldRow[getColIdx('deskripsi')],
