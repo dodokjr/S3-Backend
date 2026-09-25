@@ -399,21 +399,60 @@ router.get('/finance', async (req, res) => {
 });
 
 // Tambah Data Keuangan (Hanya Developer & Admin)
+// Tambah Data Keuangan (Hanya Developer & Admin)
+// PERBAIKAN: sebelumnya endpoint ini menulis field { id, tanggal, keterangan,
+// tipe, jumlah } yang TIDAK cocok dengan struktur sheet asli
+// (No_id, Deskripsi, pengeluaran, pemasukan, tgl, bulan, tahun — 7 kolom).
+// Sekarang disesuaikan, dan No_id di-generate otomatis (auto-increment)
+// mengikuti pola yang sama seperti di /users.
 router.post('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
   try {
-    const { id, tanggal, keterangan, tipe, jumlah } = req.body;
+    const { deskripsi, pemasukan, pengeluaran, tgl, bulan, tahun } = req.body;
+
+    if (!deskripsi || !tgl || !bulan || !tahun) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deskripsi, tanggal, bulan, dan tahun wajib diisi!',
+      });
+    }
+
     const sheets = await getSheetClient();
+
+    const existingResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Keuangan!A:H',
+    });
+
+    const rows = existingResponse.data.values || [];
+    const dataRows = rows.slice(1);
+
+    let maxId = 0;
+    dataRows.forEach((row) => {
+      const idNumber = Number(row[0]);
+      if (!Number.isNaN(idNumber) && idNumber > maxId) {
+        maxId = idNumber;
+      }
+    });
+    const newId = (maxId + 1).toString();
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Keuangan!A:H',
+      range: 'Keuangan!A:G',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[id, tanggal, keterangan, tipe, jumlah]]
-      }
+        values: [[
+          newId,
+          deskripsi,
+          pengeluaran || '0',
+          pemasukan || '0',
+          tgl,
+          bulan,
+          tahun,
+        ]],
+      },
     });
 
-    res.json({ success: true, message: 'Data keuangan berhasil ditambahkan!' });
+    res.json({ success: true, message: 'Data keuangan berhasil ditambahkan!', data: { id: newId } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: error.message });
@@ -423,7 +462,7 @@ router.post('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
 // Update Data Keuangan (Hanya Developer & Admin)
 router.put('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
   try {
-    const { id, tanggal, keterangan, tipe, jumlah } = req.body;
+    const { id, deskripsi, pemasukan, pengeluaran, tgl, bulan, tahun } = req.body;
     if (!id) return res.status(400).json({ success: false, message: 'ID wajib disertakan untuk update keuangan.' });
 
     const sheets = await getSheetClient();
@@ -439,7 +478,7 @@ router.put('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => 
     let rowIndex = -1;
 
     for (let i = 1; i < rows.length; i++) {
-      const dbId = rows[i][0] || ''; 
+      const dbId = rows[i][headers.indexOf('no_id')] || '';
       if (dbId.toString() === id.toString()) {
         rowIndex = i + 1;
         break;
@@ -451,17 +490,19 @@ router.put('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => 
     const oldRow = rows[rowIndex - 1];
     const updatedRow = [
       id,
-      tanggal !== undefined ? tanggal : oldRow[headers.indexOf('tanggal')],
-      keterangan !== undefined ? keterangan : oldRow[headers.indexOf('keterangan')],
-      tipe !== undefined ? tipe : oldRow[headers.indexOf('tipe')],
-      jumlah !== undefined ? jumlah : oldRow[headers.indexOf('jumlah')]
+      deskripsi !== undefined ? deskripsi : oldRow[headers.indexOf('deskripsi')],
+      pengeluaran !== undefined ? pengeluaran : oldRow[headers.indexOf('pengeluaran')],
+      pemasukan !== undefined ? pemasukan : oldRow[headers.indexOf('pemasukan')],
+      tgl !== undefined ? tgl : oldRow[headers.indexOf('tgl')],
+      bulan !== undefined ? bulan : oldRow[headers.indexOf('bulan')],
+      tahun !== undefined ? tahun : oldRow[headers.indexOf('tahun')],
     ];
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Keuangan!A${rowIndex}:E${rowIndex}`,
+      range: `Keuangan!A${rowIndex}:G${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [updatedRow] }
+      requestBody: { values: [updatedRow] },
     });
 
     res.json({ success: true, message: 'Data keuangan berhasil diperbarui!' });
