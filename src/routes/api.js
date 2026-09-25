@@ -598,7 +598,7 @@ router.get('/sales', async (req, res) => {
   }
 });
 
-// Tambah Data Sales (Developer, Admin, Sales)
+// Tambah Data Sales (POST)
 router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
     const { Deskripsi, Costumer, tgl, status } = req.body;
@@ -606,10 +606,10 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const hargaBeli = req.body['harga beli'];
     const nameSeles = req.body.nama_seles;
     
-    // Menangkap input dari berbagai kemungkinan penulisan key dari frontend
-    const inputPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
-    const inputPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
-    const inputKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
+    // Ambil input dari berbagai variasi penulisan key
+    const rawPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
+    const rawPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
+    const rawKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
 
     if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl || !nameSeles) {
       return res.status(400).json({
@@ -618,22 +618,23 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
       });
     }
 
-    // Validasi: Harus mengisi salah satu saja (Pcs, Pack, atau Kilogram)
-    const hasPcs = inputPcs !== undefined && inputPcs !== null && inputPcs !== '' && Number(inputPcs) > 0;
-    const hasPack = inputPack !== undefined && inputPack !== null && inputPack !== '' && Number(inputPack) > 0;
-    const hasKg = inputKg !== undefined && inputKg !== null && inputKg !== '' && Number(inputKg) > 0;
+    // Tentukan nilai Pcs, Pack, Kilogram secara eksklusif (jika diisi salah satu, yang lain otomatis 0)
+    let finalPcs = '0';
+    let finalPack = '0';
+    let finalKilogram = '0';
 
-    if (!hasPcs && !hasPack && !hasKg) {
+    if (rawPcs !== undefined && rawPcs !== null && rawPcs !== '' && Number(rawPcs) !== 0) {
+      finalPcs = rawPcs;
+    } else if (rawPack !== undefined && rawPack !== null && rawPack !== '' && Number(rawPack) !== 0) {
+      finalPack = rawPack;
+    } else if (rawKg !== undefined && rawKg !== null && rawKg !== '' && Number(rawKg) !== 0) {
+      finalKilogram = rawKg;
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'Anda harus mengisi salah satu satuan: Pcs, Pack, atau Kilogram!',
+        message: 'Anda harus mengisi salah satu satuan (Pcs, Pack, atau Kilogram) dengan nilai yang valid!',
       });
     }
-
-    // Logika Eksklusif: Hanya isi kolom yang diinput user, sisanya '0'
-    const finalPcs = hasPcs ? inputPcs : '0';
-    const finalPack = hasPack ? inputPack : '0';
-    const finalKilogram = hasKg ? inputKg : '0';
 
     const sheets = await getSheetClient();
 
@@ -700,7 +701,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
   }
 });
 
-// Update Data Sales (Developer, Admin, Sales) - Update satuan yang diketik saja
+// Update Data Sales (PUT)
 router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
     const { id, Deskripsi, Costumer, tgl, status } = req.body;
@@ -708,9 +709,9 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
     const hargaBeli = req.body['harga beli'];
     const nameSeles = req.body.nama_seles;
     
-    const inputPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
-    const inputPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
-    const inputKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
+    const rawPcs = req.body.Pcs !== undefined ? req.body.Pcs : req.body.pcs;
+    const rawPack = req.body.Pack !== undefined ? req.body.Pack : req.body.pack;
+    const rawKg = req.body.Kilogram !== undefined ? req.body.Kilogram : (req.body.kilogram !== undefined ? req.body.kilogram : req.body.KG);
 
     if (!id) return res.status(400).json({ success: false, message: 'id wajib disertakan untuk update sales.' });
 
@@ -746,25 +747,23 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
     };
 
     // Logika Update Satuan: 
-    // Jika user mengirimkan salah satu satuan (misal Pcs), maka Pcs di-update, 
-    // sementara Pack & Kilogram otomatis diset '0' (atau bisa diatur mempertahankan nilai lama jika diinginkan).
-    // Berdasarkan permintaan "jika user ketik 1 pcs maka yang update 1 pcs ... dan seterusnya":
+    // Jika salah satu satuan diisi, maka satuan itu diisi angkanya dan yang lain otomatis '0'. 
+    // Jika tidak ada input satuan yang dikirim saat update, gunakan nilai lama dari database.
     let finalPcs, finalPack, finalKilogram;
 
-    if (inputPcs !== undefined) {
-      finalPcs = inputPcs;
+    if (rawPcs !== undefined && rawPcs !== '') {
+      finalPcs = rawPcs;
       finalPack = '0';
       finalKilogram = '0';
-    } else if (inputPack !== undefined) {
+    } else if (rawPack !== undefined && rawPack !== '') {
       finalPcs = '0';
-      finalPack = inputPack;
+      finalPack = rawPack;
       finalKilogram = '0';
-    } else if (inputKg !== undefined) {
+    } else if (rawKg !== undefined && rawKg !== '') {
       finalPcs = '0';
       finalPack = '0';
-      finalKilogram = inputKg;
+      finalKilogram = rawKg;
     } else {
-      // Jika tidak ada input satuan yang dikirim di request update, gunakan nilai lama
       finalPcs = oldRow[getColIdx(['pcs'])];
       finalPack = oldRow[getColIdx(['pack'])];
       finalKilogram = oldRow[getColIdx(['kilogram', 'kg'])];
@@ -798,7 +797,7 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
   }
 });
 
-// Hapus Data Sales (Developer, Admin, Sales)
+// Hapus Data Sales (DELETE)
 router.delete('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
     const { id } = req.body;
