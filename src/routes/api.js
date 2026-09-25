@@ -577,7 +577,7 @@ router.get('/sales', async (req, res) => {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:G',
+      range: 'Sales!A:H',
     });
 
     const rows = response.data.values;
@@ -640,10 +640,10 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:G',
+      range: 'Sales!A:H',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus]]
+        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus, nameSeles]]
       }
     });
 
@@ -658,6 +658,7 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
         'harga beli': hargaBeli,
         tgl,
         status: finalStatus,
+        name_seles: nameSeles
       }
     });
   } catch (error) {
@@ -682,7 +683,7 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:G',
+      range: 'Sales!A:H',
     });
 
     const rows = response.data.values;
@@ -735,7 +736,7 @@ router.delete('/sales', verifyToken, checkModuleAccess('sales'), async (req, res
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:G',
+      range: 'Sales!A:H',
     });
 
     const rows = response.data.values;
