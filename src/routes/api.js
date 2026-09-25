@@ -1,37 +1,48 @@
 const express = require('express');
 const router = express.Router();
 const { getSheetClient, SPREADSHEET_ID } = require('../config/googleSheets');
-const { verifyToken, allowDeveloperAndAdmin } = require('../routes/middleware/auth');
+
+// verifyToken, allowDeveloperAndAdmin, dan checkModuleAccess sekarang semua
+// ada di satu file middleware yang sama: routes/middleware/auth.js
+const { verifyToken, allowDeveloperAndAdmin, checkModuleAccess } = require('../routes/middleware/auth');
 
 // ==========================================
 // 1. ENDPOINT USERS
 // ==========================================
 
-// Membaca data Users (butuh login, tapi tidak harus admin/dev — sesuaikan
-// jika ingin GET ini juga dibatasi hanya admin/dev dengan menambahkan
-// allowDeveloperAndAdmin setelah verifyToken)
+// Membaca data Users (butuh login).
+// Role 'sales' dan 'finance' tetap boleh GET /users, tapi hasilnya difilter
+// supaya hanya melihat data profil dirinya sendiri (match by email).
 router.get('/users', verifyToken, async (req, res) => {
   try {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Users!A:F', 
+      range: 'Users!A:F',
     });
 
     const rows = response.data.values;
     if (!rows || rows.length === 0) return res.json({ success: true, data: [] });
 
     const headers = rows[0].map(h => h.trim().toLowerCase());
-    const dataRows = rows.slice(1); 
+    const dataRows = rows.slice(1);
 
-    const formattedData = dataRows.map((row) => {
+    let formattedData = dataRows.map((row) => {
       let obj = {};
       headers.forEach((header, index) => {
-        obj[header] = row[index] || ''; 
+        obj[header] = row[index] || '';
       });
-      delete obj.password; // Password tidak pernah dikirim ke client
+      delete obj.password;
       return obj;
     });
+
+    const requesterRole = (req.user?.role || '').toString().toLowerCase();
+    if (requesterRole === 'sales' || requesterRole === 'finance') {
+      const requesterEmail = (req.user?.email || '').toString().toLowerCase();
+      formattedData = formattedData.filter(
+        (u) => (u.email || '').toString().toLowerCase() === requesterEmail
+      );
+    }
 
     res.json({ success: true, data: formattedData });
   } catch (error) {
@@ -40,7 +51,6 @@ router.get('/users', verifyToken, async (req, res) => {
   }
 });
 
-// Tambah User Baru (Hanya Developer & Admin)
 // Tambah User Baru (Hanya Developer & Admin)
 router.post('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
   try {
@@ -52,15 +62,13 @@ router.post('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
 
     const sheets = await getSheetClient();
 
-    // Ambil data yang sudah ada untuk menentukan id berikutnya (auto-increment).
-    // Kolom A sekarang berisi id, sehingga range diperluas dari A:E menjadi A:F.
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Users!A:F',
     });
 
     const rows = existingResponse.data.values || [];
-    const dataRows = rows.slice(1); // lewati baris header
+    const dataRows = rows.slice(1);
 
     let maxId = 0;
     dataRows.forEach((row) => {
@@ -71,19 +79,22 @@ router.post('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     });
     const newId = (maxId + 1).toString();
 
+    const allowedRoles = ['admin', 'developer', 'karyawan', 'sales', 'finance'];
+    const finalRole = allowedRoles.includes((role || '').toLowerCase()) ? role : 'karyawan';
+
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Users!A:F',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[newId, name, email, password || '', role || 'karyawan', is_login || false]]
+        values: [[newId, name, email, password || '', finalRole, is_login || false]]
       }
     });
 
     res.json({
       success: true,
       message: 'User berhasil ditambahkan!',
-      data: { id: newId, name, email, role: role || 'karyawan', status: is_login ? 'TRUE' : 'FALSE' }
+      data: { id: newId, name, email, role: finalRole, status: is_login ? 'TRUE' : 'FALSE' }
     });
   } catch (error) {
     console.error(error);
@@ -100,7 +111,7 @@ router.put('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Users!A:F', // PERBAIKAN: A:E -> A:F karena kolom id ditambahkan di posisi A
+      range: 'Users!A:F',
     });
 
     const rows = response.data.values;
@@ -120,20 +131,23 @@ router.put('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     if (rowIndex === -1) return res.status(404).json({ success: false, message: 'User tidak ditemukan.' });
 
     const oldRow = rows[rowIndex - 1];
-    // PERBAIKAN: id (kolom pertama) dipertahankan apa adanya dari baris lama —
-    // id tidak boleh berubah saat update, hanya field lain yang bisa diperbarui.
+    const allowedRoles = ['admin', 'developer', 'karyawan', 'sales', 'finance'];
+    const finalRole = role !== undefined
+      ? (allowedRoles.includes((role || '').toLowerCase()) ? role : oldRow[headers.indexOf('role')])
+      : oldRow[headers.indexOf('role')];
+
     const updatedRow = [
       oldRow[headers.indexOf('id')],
       name !== undefined ? name : oldRow[headers.indexOf('name')],
       email,
       password !== undefined ? password : oldRow[headers.indexOf('password')],
-      role !== undefined ? role : oldRow[headers.indexOf('role')],
+      finalRole,
       is_login !== undefined ? is_login : oldRow[headers.indexOf('is_login')]
     ];
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Users!A${rowIndex}:F${rowIndex}`, // PERBAIKAN: A:E -> A:F
+      range: `Users!A${rowIndex}:F${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [updatedRow] }
     });
@@ -154,7 +168,7 @@ router.delete('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Users!A:F', // PERBAIKAN: A:E -> A:F
+      range: 'Users!A:F',
     });
 
     const rows = response.data.values;
@@ -203,25 +217,24 @@ router.delete('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
 // 2. ENDPOINT REAL STOCK
 // ==========================================
 
-// Membaca data Real Stock (publik/tanpa proteksi, sesuai perilaku asli)
 router.get('/stock', async (req, res) => {
   try {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Real_Stock!A:H', 
+      range: 'Real_Stock!A:H',
     });
 
     const rows = response.data.values;
     if (!rows || rows.length === 0) return res.json({ success: true, data: [] });
 
-    const headers = rows[0]; 
-    const dataRows = rows.slice(1); 
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
 
     const formattedData = dataRows.map((row) => {
       let obj = {};
       headers.forEach((header, index) => {
-        obj[header.trim()] = row[index] || ''; 
+        obj[header.trim()] = row[index] || '';
       });
       return obj;
     });
@@ -233,8 +246,7 @@ router.get('/stock', async (req, res) => {
   }
 });
 
-// Tambah Stock Barang (Hanya Developer & Admin)
-router.post('/stock', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
+router.post('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) => {
   try {
     const { No_ID, Nama_Barang, Box, PerPcs, PerDus, Harga, Satuan, Gambar } = req.body;
     const sheets = await getSheetClient();
@@ -255,8 +267,7 @@ router.post('/stock', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
   }
 });
 
-// Update Stock Barang (Hanya Developer & Admin)
-router.put('/stock', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
+router.put('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) => {
   try {
     const { No_ID, Nama_Barang, Box, PerPcs, PerDus, Harga, Satuan, Gambar } = req.body;
     if (!No_ID) return res.status(400).json({ success: false, message: 'No_ID wajib disertakan untuk update stock.' });
@@ -309,8 +320,7 @@ router.put('/stock', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
   }
 });
 
-// Hapus Stock Barang (Hanya Developer & Admin)
-router.delete('/stock', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
+router.delete('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) => {
   try {
     const { No_ID } = req.body;
     if (!No_ID) return res.status(400).json({ success: false, message: 'No_ID wajib disertakan untuk menghapus stock.' });
@@ -363,30 +373,28 @@ router.delete('/stock', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
   }
 });
 
-
 // ==========================================
 // 3. ENDPOINT KEUANGAN (FINANCIAL)
 // ==========================================
 
-// Membaca data Keuangan (publik/tanpa proteksi, sesuai perilaku asli)
 router.get('/finance', async (req, res) => {
   try {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Keuangan!A:H', 
+      range: 'Keuangan!A:H',
     });
 
     const rows = response.data.values;
     if (!rows || rows.length === 0) return res.json({ success: true, data: [] });
 
-    const headers = rows[0]; 
-    const dataRows = rows.slice(1); 
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
 
     const formattedData = dataRows.map((row) => {
       let obj = {};
       headers.forEach((header, index) => {
-        obj[header.trim()] = row[index] || ''; 
+        obj[header.trim()] = row[index] || '';
       });
       return obj;
     });
@@ -398,14 +406,7 @@ router.get('/finance', async (req, res) => {
   }
 });
 
-// Tambah Data Keuangan (Hanya Developer & Admin)
-// Tambah Data Keuangan (Hanya Developer & Admin)
-// PERBAIKAN: sebelumnya endpoint ini menulis field { id, tanggal, keterangan,
-// tipe, jumlah } yang TIDAK cocok dengan struktur sheet asli
-// (No_id, Deskripsi, pengeluaran, pemasukan, tgl, bulan, tahun — 7 kolom).
-// Sekarang disesuaikan, dan No_id di-generate otomatis (auto-increment)
-// mengikuti pola yang sama seperti di /users.
-router.post('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
+router.post('/finance', verifyToken, checkModuleAccess('finance'), async (req, res) => {
   try {
     const { deskripsi, pemasukan, pengeluaran, tgl, bulan, tahun } = req.body;
 
@@ -459,8 +460,7 @@ router.post('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
   }
 });
 
-// Update Data Keuangan (Hanya Developer & Admin)
-router.put('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
+router.put('/finance', verifyToken, checkModuleAccess('finance'), async (req, res) => {
   try {
     const { id, deskripsi, pemasukan, pengeluaran, tgl, bulan, tahun } = req.body;
     if (!id) return res.status(400).json({ success: false, message: 'ID wajib disertakan untuk update keuangan.' });
@@ -512,8 +512,7 @@ router.put('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => 
   }
 });
 
-// Hapus Data Keuangan (Hanya Developer & Admin)
-router.delete('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
+router.delete('/finance', verifyToken, checkModuleAccess('finance'), async (req, res) => {
   try {
     const { id } = req.body;
     if (!id) return res.status(400).json({ success: false, message: 'ID wajib disertakan untuk menghapus data keuangan.' });
@@ -530,7 +529,7 @@ router.delete('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) 
     let rowIndex = -1;
 
     for (let i = 1; i < rows.length; i++) {
-      const dbId = rows[i][0] || ''; 
+      const dbId = rows[i][0] || '';
       if (dbId.toString() === id.toString()) {
         rowIndex = i + 1;
         break;
@@ -559,6 +558,222 @@ router.delete('/finance', verifyToken, allowDeveloperAndAdmin, async (req, res) 
     });
 
     res.json({ success: true, message: 'Data keuangan berhasil dihapus!' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==========================================
+// 4. ENDPOINT SALES
+// ==========================================
+// PERBAIKAN: struktur disesuaikan dengan data asli yang dipakai frontend:
+// Sheet 'Sales' (A:G): id | Deskripsi | Costumer | harga jual | harga beli | tgl | status
+// (perhatikan: "Costumer" bukan "Customer", dan "harga jual"/"harga beli"
+// mengandung spasi, jadi diakses via req.body['harga jual'] dst.)
+
+router.get('/sales', async (req, res) => {
+  try {
+    const sheets = await getSheetClient();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Sales!A:G',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return res.json({ success: true, data: [] });
+
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
+
+    const formattedData = dataRows.map((row) => {
+      let obj = {};
+      headers.forEach((header, index) => {
+        obj[header.trim()] = row[index] || '';
+      });
+      return obj;
+    });
+
+    res.json({ success: true, data: formattedData });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Tambah Data Sales (Developer, Admin, Sales)
+router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
+  try {
+    const Deskripsi = req.body.Deskripsi;
+    const Costumer = req.body.Costumer;
+    const hargaJual = req.body['harga jual'];
+    const hargaBeli = req.body['harga beli'];
+    const tgl = req.body.tgl;
+    const status = req.body.status;
+
+    if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deskripsi, harga jual, harga beli, dan tgl wajib diisi!',
+      });
+    }
+
+    const sheets = await getSheetClient();
+
+    const existingResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Sales!A:G',
+    });
+
+    const rows = existingResponse.data.values || [];
+    const dataRows = rows.slice(1);
+
+    let maxId = 0;
+    dataRows.forEach((row) => {
+      const idNumber = Number(row[0]);
+      if (!Number.isNaN(idNumber) && idNumber > maxId) {
+        maxId = idNumber;
+      }
+    });
+    const newId = (maxId + 1).toString();
+    const finalStatus = status || 'success';
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Sales!A:G',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [[newId, Deskripsi, Costumer || '', hargaJual, hargaBeli, tgl, finalStatus]]
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Data sales berhasil ditambahkan!',
+      data: {
+        id: newId,
+        Deskripsi,
+        Costumer: Costumer || '',
+        'harga jual': hargaJual,
+        'harga beli': hargaBeli,
+        tgl,
+        status: finalStatus,
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Update Data Sales (Developer, Admin, Sales)
+router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
+  try {
+    const id = req.body.id;
+    const Deskripsi = req.body.Deskripsi;
+    const Costumer = req.body.Costumer;
+    const hargaJual = req.body['harga jual'];
+    const hargaBeli = req.body['harga beli'];
+    const tgl = req.body.tgl;
+    const status = req.body.status;
+
+    if (!id) return res.status(400).json({ success: false, message: 'id wajib disertakan untuk update sales.' });
+
+    const sheets = await getSheetClient();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Sales!A:G',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length <= 1) return res.status(404).json({ success: false, message: 'Data sales kosong.' });
+
+    const headers = rows[0].map(h => h.trim());
+    let rowIndex = -1;
+
+    for (let i = 1; i < rows.length; i++) {
+      const dbId = rows[i][headers.indexOf('id')] || '';
+      if (dbId.toString() === id.toString()) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+
+    if (rowIndex === -1) return res.status(404).json({ success: false, message: 'Data sales dengan id tersebut tidak ditemukan.' });
+
+    const oldRow = rows[rowIndex - 1];
+    const updatedRow = [
+      id,
+      Deskripsi !== undefined ? Deskripsi : oldRow[headers.indexOf('Deskripsi')],
+      Costumer !== undefined ? Costumer : oldRow[headers.indexOf('Costumer')],
+      hargaJual !== undefined ? hargaJual : oldRow[headers.indexOf('harga jual')],
+      hargaBeli !== undefined ? hargaBeli : oldRow[headers.indexOf('harga beli')],
+      tgl !== undefined ? tgl : oldRow[headers.indexOf('tgl')],
+      status !== undefined ? status : oldRow[headers.indexOf('status')],
+    ];
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Sales!A${rowIndex}:G${rowIndex}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [updatedRow] }
+    });
+
+    res.json({ success: true, message: 'Data sales berhasil diperbarui!' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Hapus Data Sales (Developer, Admin, Sales)
+router.delete('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ success: false, message: 'id wajib disertakan untuk menghapus data sales.' });
+
+    const sheets = await getSheetClient();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Sales!A:G',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length <= 1) return res.status(404).json({ success: false, message: 'Data sales kosong.' });
+
+    const headers = rows[0].map(h => h.trim());
+    let rowIndex = -1;
+
+    for (let i = 1; i < rows.length; i++) {
+      const dbId = rows[i][headers.indexOf('id')] || '';
+      if (dbId.toString() === id.toString()) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+
+    if (rowIndex === -1) return res.status(404).json({ success: false, message: 'Data sales tidak ditemukan.' });
+
+    const sheetInfo = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+    const sheetId = sheetInfo.data.sheets.find(s => s.properties.title === 'Sales').properties.sheetId;
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId: sheetId,
+              dimension: 'ROWS',
+              startIndex: rowIndex - 1,
+              endIndex: rowIndex
+            }
+          }
+        }]
+      }
+    });
+
+    res.json({ success: true, message: 'Data sales berhasil dihapus!' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: error.message });

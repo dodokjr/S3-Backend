@@ -70,4 +70,48 @@ const allowDeveloperAndAdmin = (req, res, next) => {
   });
 };
 
-module.exports = { verifyToken, allowDeveloperAndAdmin, JWT_SECRET };
+// ==========================================
+// MIDDLEWARE: HAK AKSES PER MODUL (SALES / FINANCE)
+// ==========================================
+// PENAMBAHAN: dipasang SETELAH verifyToken, sama seperti allowDeveloperAndAdmin.
+// Dipindahkan ke sini karena ini adalah file middleware auth yang sebenarnya
+// (lokasi: routes/middleware/auth.js) — bukan lagi ditempel di file
+// signin/logout seperti sebelumnya.
+//
+// Aturan akses per modul:
+//   - developer & admin  -> akses penuh ke semua modul (users, stock, finance, sales)
+//   - sales              -> HANYA boleh CRUD di modul 'sales'
+//   - finance            -> HANYA boleh CRUD di modul 'finance'
+//   - role lain (mis. karyawan) -> ditolak dari endpoint yang pakai middleware ini
+//
+// Pemakaian: router.post('/sales', verifyToken, checkModuleAccess('sales'), handler)
+const checkModuleAccess = (moduleName) => (req, res, next) => {
+  const role = (req.user?.role || '').toLowerCase();
+
+  if (role === 'developer' || role === 'admin') {
+    return next();
+  }
+
+  if (role === 'sales') {
+    if (moduleName === 'sales') return next();
+    return res.status(403).json({
+      success: false,
+      message: 'Akses ditolak! Role Sales hanya diizinkan mengakses endpoint /sales.',
+    });
+  }
+
+  if (role === 'finance') {
+    if (moduleName === 'finance') return next();
+    return res.status(403).json({
+      success: false,
+      message: 'Akses ditolak! Role Finance hanya diizinkan mengakses endpoint /finance.',
+    });
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: 'Akses ditolak! Role Anda tidak diizinkan mengakses endpoint ini.',
+  });
+};
+
+module.exports = { verifyToken, allowDeveloperAndAdmin, checkModuleAccess, JWT_SECRET };
