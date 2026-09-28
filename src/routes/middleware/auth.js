@@ -14,9 +14,8 @@ if (!JWT_SECRET) {
 // ==========================================
 // Membaca token dari header "Authorization: Bearer <token>", memverifikasi
 // tanda tangannya, lalu menaruh payload yang sudah tervalidasi di req.user.
-// Berbeda dari sebelumnya, role di sini TIDAK BISA dipalsukan oleh client,
-// karena token hanya bisa dibuat oleh server saat signin (menggunakan JWT_SECRET
-// yang hanya diketahui server).
+// Role di sini TIDAK BISA dipalsukan oleh client, karena token hanya bisa
+// dibuat oleh server saat signin (menggunakan JWT_SECRET yang hanya diketahui server).
 const verifyToken = (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'] || '';
@@ -32,9 +31,7 @@ const verifyToken = (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET); // throws jika invalid/expired
 
     // Lapisan pertahanan tambahan: kalau token mengklaim role 'developer',
-    // pastikan emailnya tetap cocok dengan email developer resmi. Ini menutup
-    // celah kalau suatu saat ada bug di endpoint lain yang bisa menerbitkan
-    // token dengan role developer untuk email sembarangan.
+    // pastikan emailnya tetap cocok dengan email developer resmi.
     if (decoded.role === 'developer' && decoded.email !== OFFICIAL_DEV_EMAIL.toLowerCase()) {
       return res.status(403).json({
         success: false,
@@ -71,46 +68,41 @@ const allowDeveloperAndAdmin = (req, res, next) => {
 };
 
 // ==========================================
-// MIDDLEWARE: HAK AKSES PER MODUL (SALES / FINANCE)
+// MIDDLEWARE: HAK AKSES PER MODUL
 // ==========================================
-// PENAMBAHAN: dipasang SETELAH verifyToken, sama seperti allowDeveloperAndAdmin.
-// Dipindahkan ke sini karena ini adalah file middleware auth yang sebenarnya
-// (lokasi: routes/middleware/auth.js) — bukan lagi ditempel di file
-// signin/logout seperti sebelumnya.
+// Dipasang SETELAH verifyToken, sama seperti allowDeveloperAndAdmin.
+// Lokasi: routes/middleware/auth.js
 //
-// Aturan akses per modul:
-//   - developer & admin  -> akses penuh ke semua modul (users, stock, finance, sales)
-//   - sales              -> HANYA boleh CRUD di modul 'sales'
-//   - finance            -> HANYA boleh CRUD di modul 'finance'
+// Aturan akses per modul (berlaku untuk GET, POST, PUT, dan DELETE):
+//   - /sales    -> Sales, Developer, Admin
+//   - /finance  -> Finance, Developer, Admin
+//   - /stock    -> Developer, Admin
+//   - /gudang   -> Gudang, Sales, Developer, Admin
+//   - /users    -> Developer, Admin
 //   - role lain (mis. karyawan) -> ditolak dari endpoint yang pakai middleware ini
 //
+// Mau tambah/ubah akses? Cukup edit tabel MODULE_ROLES di bawah.
+//
 // Pemakaian: router.post('/sales', verifyToken, checkModuleAccess('sales'), handler)
+const MODULE_ROLES = {
+  sales:   ['developer', 'admin', 'sales'],
+  finance: ['developer', 'admin', 'finance'],
+  stock:   ['developer', 'admin'],
+  gudang:  ['developer', 'admin', 'sales', 'gudang'],
+  users:   ['developer', 'admin'],
+};
+
 const checkModuleAccess = (moduleName) => (req, res, next) => {
   const role = (req.user?.role || '').toLowerCase();
+  const allowedRoles = MODULE_ROLES[moduleName] || ['developer', 'admin'];
 
-  if (role === 'developer' || role === 'admin') {
+  if (allowedRoles.includes(role)) {
     return next();
-  }
-
-  if (role === 'sales') {
-    if (moduleName === 'sales') return next();
-    return res.status(403).json({
-      success: false,
-      message: 'Akses ditolak! Role Sales hanya diizinkan mengakses endpoint /sales.',
-    });
-  }
-
-  if (role === 'finance') {
-    if (moduleName === 'finance') return next();
-    return res.status(403).json({
-      success: false,
-      message: 'Akses ditolak! Role Finance hanya diizinkan mengakses endpoint /finance.',
-    });
   }
 
   return res.status(403).json({
     success: false,
-    message: 'Akses ditolak! Role Anda tidak diizinkan mengakses endpoint ini.',
+    message: `Akses ditolak! Endpoint /${moduleName} hanya bisa diakses oleh role: ${allowedRoles.join(', ')}.`,
   });
 };
 

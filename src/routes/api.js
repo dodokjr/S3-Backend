@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { getSheetClient, SPREADSHEET_ID } = require('../config/googleSheets');
 
-// verifyToken, allowDeveloperAndAdmin, dan checkModuleAccess sekarang semua
-// ada di satu file middleware yang sama: routes/middleware/auth.js
+// verifyToken, allowDeveloperAndAdmin, dan checkModuleAccess ada di satu file
+// middleware yang sama: routes/middleware/auth.js
 const { verifyToken, allowDeveloperAndAdmin, checkModuleAccess } = require('../routes/middleware/auth');
 
 // ==========================================
@@ -11,7 +11,7 @@ const { verifyToken, allowDeveloperAndAdmin, checkModuleAccess } = require('../r
 // ==========================================
 
 // Membaca data Users (butuh login).
-// Role 'sales' dan 'finance' tetap boleh GET /users, tapi hasilnya difilter
+// Role 'sales', 'finance', dan 'gudang' tetap boleh GET /users, tapi hasilnya difilter
 // supaya hanya melihat data profil dirinya sendiri (match by email).
 router.get('/users', verifyToken, async (req, res) => {
   try {
@@ -37,7 +37,7 @@ router.get('/users', verifyToken, async (req, res) => {
     });
 
     const requesterRole = (req.user?.role || '').toString().toLowerCase();
-    if (requesterRole === 'sales' || requesterRole === 'finance') {
+    if (requesterRole === 'sales' || requesterRole === 'finance' || requesterRole === 'gudang') {
       const requesterEmail = (req.user?.email || '').toString().toLowerCase();
       formattedData = formattedData.filter(
         (u) => (u.email || '').toString().toLowerCase() === requesterEmail
@@ -79,7 +79,7 @@ router.post('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     });
     const newId = (maxId + 1).toString();
 
-    const allowedRoles = ['admin', 'developer', 'karyawan', 'sales', 'finance'];
+    const allowedRoles = ['admin', 'developer', 'karyawan', 'sales', 'finance', 'gudang'];
     const finalRole = allowedRoles.includes((role || '').toLowerCase()) ? role : 'karyawan';
 
     await sheets.spreadsheets.values.append({
@@ -131,7 +131,7 @@ router.put('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) => {
     if (rowIndex === -1) return res.status(404).json({ success: false, message: 'User tidak ditemukan.' });
 
     const oldRow = rows[rowIndex - 1];
-    const allowedRoles = ['admin', 'developer', 'karyawan', 'sales', 'finance'];
+    const allowedRoles = ['admin', 'developer', 'karyawan', 'sales', 'finance', 'gudang'];
     const finalRole = role !== undefined
       ? (allowedRoles.includes((role || '').toLowerCase()) ? role : oldRow[headers.indexOf('role')])
       : oldRow[headers.indexOf('role')];
@@ -246,7 +246,7 @@ router.get('/stock', async (req, res) => {
   }
 });
 
-router.post('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) => {
+router.post('/stock', verifyToken, checkModuleAccess('gudang'), async (req, res) => {
   try {
     const { No_ID, Nama_Barang, Box, PerPcs, PerDus, Harga, Satuan, Gambar } = req.body;
     const sheets = await getSheetClient();
@@ -267,7 +267,7 @@ router.post('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) 
   }
 });
 
-router.put('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) => {
+router.put('/stock', verifyToken, checkModuleAccess('gudang'), async (req, res) => {
   try {
     const { No_ID, Nama_Barang, Box, PerPcs, PerDus, Harga, Satuan, Gambar } = req.body;
     if (!No_ID) return res.status(400).json({ success: false, message: 'No_ID wajib disertakan untuk update stock.' });
@@ -320,7 +320,7 @@ router.put('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) =
   }
 });
 
-router.delete('/stock', verifyToken, checkModuleAccess('stock'), async (req, res) => {
+router.delete('/stock', verifyToken, checkModuleAccess('gudang'), async (req, res) => {
   try {
     const { No_ID } = req.body;
     if (!No_ID) return res.status(400).json({ success: false, message: 'No_ID wajib disertakan untuk menghapus stock.' });
@@ -375,9 +375,10 @@ router.delete('/stock', verifyToken, checkModuleAccess('stock'), async (req, res
 
 // ==========================================
 // 3. ENDPOINT KEUANGAN (FINANCIAL)
+// Akses GET/POST/PUT/DELETE: Finance, Developer, Admin
 // ==========================================
 
-router.get('/finance', async (req, res) => {
+router.get('/finance', verifyToken, checkModuleAccess('finance'), async (req, res) => {
   try {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
@@ -475,10 +476,16 @@ router.put('/finance', verifyToken, checkModuleAccess('finance'), async (req, re
     if (!rows || rows.length <= 1) return res.status(404).json({ success: false, message: 'Data keuangan kosong.' });
 
     const headers = rows[0].map(h => h.trim().toLowerCase());
+
+    // Kolom ID: coba 'no_id', lalu 'id', fallback ke kolom pertama (A).
+    let idColIdx = headers.indexOf('no_id');
+    if (idColIdx === -1) idColIdx = headers.indexOf('id');
+    if (idColIdx === -1) idColIdx = 0;
+
     let rowIndex = -1;
 
     for (let i = 1; i < rows.length; i++) {
-      const dbId = rows[i][headers.indexOf('no_id')] || '';
+      const dbId = rows[i][idColIdx] || '';
       if (dbId.toString() === id.toString()) {
         rowIndex = i + 1;
         break;
@@ -566,10 +573,11 @@ router.delete('/finance', verifyToken, checkModuleAccess('finance'), async (req,
 
 // ==========================================
 // 4. ENDPOINT SALES
+// Akses GET/POST/PUT/DELETE: Sales, Developer, Admin
 // ==========================================
 
 // GET Data Sales
-router.get('/sales', async (req, res) => {
+router.get('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) => {
   try {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
@@ -653,23 +661,24 @@ router.post('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) 
     const newId = (maxId + 1).toString();
     const finalStatus = status || 'success';
 
-    // Urutan kolom di Google Sheets: id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram
+    // Urutan kolom di Google Sheets:
+    // id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Sales!A:K',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[
-          newId, 
-          Deskripsi, 
-          Costumer || '', 
-          hargaJual, 
-          hargaBeli, 
-          tgl, 
-          finalStatus, 
-          nama_seles, 
-          finalPcs, 
-          finalPack, 
+          newId,
+          Deskripsi,
+          Costumer || '',
+          hargaJual,
+          hargaBeli,
+          tgl,
+          finalStatus,
+          nama_seles,
+          finalPcs,
+          finalPack,
           finalKilogram
         ]]
       }
@@ -783,7 +792,7 @@ router.put('/sales', verifyToken, checkModuleAccess('sales'), async (req, res) =
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Sales!A\({rowIndex}:K\){rowIndex}`,
+      range: `Sales!A${rowIndex}:K${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [updatedRow] }
     });
