@@ -215,6 +215,8 @@ router.delete('/users', verifyToken, allowDeveloperAndAdmin, async (req, res) =>
 
 // ==========================================
 // 2. ENDPOINT REAL STOCK
+// GET: terbuka (tanpa token)
+// POST/PUT/DELETE: Gudang, Sales, Admin, Developer
 // ==========================================
 
 router.get('/stock', async (req, res) => {
@@ -375,10 +377,11 @@ router.delete('/stock', verifyToken, checkModuleAccess('gudang'), async (req, re
 
 // ==========================================
 // 3. ENDPOINT KEUANGAN (FINANCIAL)
-// Akses GET/POST/PUT/DELETE: Finance, Developer, Admin
+// GET: terbuka (tanpa token)
+// POST/PUT/DELETE: Finance, Developer, Admin
 // ==========================================
 
-router.get('/finance', verifyToken, checkModuleAccess('finance'), async (req, res) => {
+router.get('/finance', async (req, res) => {
   try {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
