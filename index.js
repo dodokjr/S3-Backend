@@ -33,7 +33,10 @@ const PORT = process.env.PORT || 3001;
 
 // Limiter khusus: login (anti brute-force) dan tulis data (anti spam)
 app.use('/s3/api/auth', authLimiter);
-app.use('/s3/api', writeLimiter);
+// writeLimiter dilewati untuk /auth supaya login tidak terkena dua limiter sekaligus
+app.use('/s3/api', (req, res, next) =>
+  req.path.startsWith('/auth') ? next() : writeLimiter(req, res, next)
+);
 
 // Mendaftarkan Routes
 app.use('/s3/api', apiRoutes);       // Mengakses /s3/api/stock, /s3/api/sales, dst
