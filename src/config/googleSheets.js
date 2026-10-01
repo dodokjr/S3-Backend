@@ -1,7 +1,7 @@
 const { google } = require('googleapis');
 
 const SPREADSHEET_ID = '1RkRKEt8AW0CNArv-FqEM9JJYUox1fGHZkV9JLuQgqXw';
-const OFFICIAL_DEV_EMAIL = 's3-600@appss-3c587.iam.gserviceaccount.com';
+const OFFICIAL_DEV_EMAIL = process.env.OFFICIAL_DEV_EMAIL;
 
 async function getSheetClient() {
   const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
