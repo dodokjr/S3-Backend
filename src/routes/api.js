@@ -7,5 +7,6 @@ router.use(require('./route/Userroutes'));
 router.use(require('./route/Stockroutes'));
 router.use(require('./route/Financeroutes'));
 router.use(require('./route/Salesroutes'));
+router.use(require('./route/MessageDevroutes'))
 
 module.exports = router;

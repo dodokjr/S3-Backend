@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middleware/auth');
-const messageController = require('../controllers/messageController');
+const messageController = require('../controllers/MessageDevcontroller');
 
 // 2. MESSAGES
 // GET: butuh login (admin & developer melihat semua pesan, role lain hanya pesan miliknya)
