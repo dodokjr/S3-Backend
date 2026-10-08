@@ -1,7 +1,7 @@
 const { getSheetClient, SPREADSHEET_ID } = require('../../config/googleSheets');
 const { badRequest, notFound } = require('../Utils/Errors');
 
-const SHEET_NAME = 'Developer_message';
+const SHEET_NAME = 'Messages';
 const RANGE = `${SHEET_NAME}!A:E`;
 const DEFAULT_HEADERS = ['id', 'nama', 'email', 'pesan', 'tag'];
 const ALLOWED_TAGS = ['developer', 'semidev'];
@@ -106,7 +106,7 @@ exports.createMessage = async (req, res, next) => {
     const idxPesan = colIndex(headers, 'pesan');
     const idxTag = colIndex(headers, 'tag');
     if ([idxId, idxNama, idxEmail, idxPesan, idxTag].includes(-1)) {
-      throw new Error(`Header sheet ${SHEET_NAME} harus: ${DEFAULT_HEADERS.join(', ')}`);
+      throw badRequest(`Header sheet ${SHEET_NAME} harus: ${DEFAULT_HEADERS.join(', ')}`);
     }
 
     // ID baru (auto increment)
@@ -138,6 +138,8 @@ exports.createMessage = async (req, res, next) => {
       data: { id: newId, nama: user.nama, email: user.email, pesan, tag: tags },
     });
   } catch (error) {
+    // Log detail asli (termasuk balasan error dari Google API) supaya terlihat di log server/Vercel
+    console.error('[createMessage]', error?.response?.data || error);
     next(error);
   }
 };
@@ -188,6 +190,7 @@ exports.getMessages = async (req, res, next) => {
 
     res.json({ success: true, data });
   } catch (error) {
+    console.error('[getMessages]', error?.response?.data || error);
     next(error);
   }
 };
