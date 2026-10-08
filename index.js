@@ -20,7 +20,8 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',').map((o) => o.trim()).filter(Boolean);
 app.use(cors({
   origin: allowedOrigins.length ? allowedOrigins : true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  // PATCH wajib ada, kalau tidak preflight untuk ubah status pesan akan diblokir browser
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 600,
 }));
