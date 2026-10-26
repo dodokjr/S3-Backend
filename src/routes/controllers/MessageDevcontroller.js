@@ -6,7 +6,6 @@ const RANGE = `${SHEET_NAME}!A:F`;
 const DEFAULT_HEADERS = ['id', 'nama', 'email', 'pesan', 'tag', 'status'];
 const ALLOWED_TAGS = ['developer', 'semidev'];
 const MAX_MESSAGE = 500;
-// Role yang boleh melihat semua pesan & mengubah status. Role lain hanya melihat pesan miliknya sendiri.
 const VIEW_ALL_ROLES = ['admin', 'developer'];
 
 // ===== Status pesan =====

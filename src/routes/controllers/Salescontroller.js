@@ -4,8 +4,21 @@ const {
   toNum,
   planStockChange,
   commitStockChange,
+  addManualStock,
   salesRowQty,
 } = require('../helpers/Stockhelper');
+
+// Flag dari frontend: true jika nama barang diketik manual (bukan dipilih dari stok)
+const isManual = (body) => {
+  const v = body.manual ?? body.input_manual;
+  return v === true || v === 'true' || v === 1 || v === '1';
+};
+
+// Ambil nilai No Seles Invoice & No DO dari body (mendukung beberapa penamaan key)
+const pickNoSelesInvoice = (body) =>
+  body.no_seles_invoice ?? body['no seles invoice'] ?? body['No Seles Invoice'];
+const pickNoDO = (body) =>
+  body.no_do ?? body['no do'] ?? body['No DO'];
 
 // GET Data Sales
 exports.getSales = async (req, res, next) => {
@@ -13,7 +26,7 @@ exports.getSales = async (req, res, next) => {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:K',
+      range: 'Sales!A:M',
     });
 
     const rows = response.data.values;
@@ -42,6 +55,8 @@ exports.createSales = async (req, res, next) => {
     const { Deskripsi, Costumer, tgl, status, satuan, jumlah, nama_seles } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
+    const noSelesInvoice = pickNoSelesInvoice(req.body);
+    const noDO = pickNoDO(req.body);
 
     // Validasi field utama
     if (!Deskripsi || hargaJual === undefined || hargaBeli === undefined || !tgl || !nama_seles || !satuan || jumlah === undefined) {
@@ -72,12 +87,16 @@ exports.createSales = async (req, res, next) => {
 
     const sheets = await getSheetClient();
 
-    // 1) Validasi stok dulu (belum menulis apa pun)
-    const stockPlan = await planStockChange(sheets, { newItem: Deskripsi, newQty: qty });
+    // 1) Validasi stok dulu (belum menulis apa pun).
+    //    Jika barang diketik manual: tidak cek stok, langsung dimasukkan ke stok setelah sales tersimpan.
+    const manual = isManual(req.body);
+    const stockPlan = manual
+      ? null
+      : await planStockChange(sheets, { newItem: Deskripsi, newQty: qty });
 
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:K',
+      range: 'Sales!A:M',
     });
 
     const rows = existingResponse.data.values || [];
@@ -94,10 +113,10 @@ exports.createSales = async (req, res, next) => {
     const finalStatus = status || 'success';
 
     // Urutan kolom di Google Sheets:
-    // id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram
+    // id | Deskripsi | Costumer | harga jual | harga beli | tgl | status | nama_seles | Pcs | Pack | Kilogram | No Seles Invoice | No DO
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:K',
+      range: 'Sales!A:M',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[
@@ -111,13 +130,19 @@ exports.createSales = async (req, res, next) => {
           nama_seles,
           finalPcs,
           finalPack,
-          finalKilogram
+          finalKilogram,
+          noSelesInvoice || '',
+          noDO || ''
         ]]
       }
     });
 
-    // 2) Setelah sales tersimpan, kurangi PerPcs
-    await commitStockChange(sheets, stockPlan);
+    // 2) Setelah sales tersimpan: barang manual -> masuk ke stok, selain itu kurangi PerPcs
+    if (manual) {
+      await addManualStock(sheets, { nama: Deskripsi, qty, satuan: normalizedSatuan, harga: hargaBeli });
+    } else {
+      await commitStockChange(sheets, stockPlan);
+    }
 
     res.json({
       success: true,
@@ -133,7 +158,9 @@ exports.createSales = async (req, res, next) => {
         nama_seles,
         Pcs: finalPcs,
         Pack: finalPack,
-        Kilogram: finalKilogram
+        Kilogram: finalKilogram,
+        'No Seles Invoice': noSelesInvoice || '',
+        'No DO': noDO || ''
       }
     });
   } catch (error) {
@@ -147,13 +174,15 @@ exports.updateSales = async (req, res, next) => {
     const { id, Deskripsi, Costumer, tgl, status, satuan, jumlah, nama_seles } = req.body;
     const hargaJual = req.body['harga jual'];
     const hargaBeli = req.body['harga beli'];
+    const noSelesInvoice = pickNoSelesInvoice(req.body);
+    const noDO = pickNoDO(req.body);
 
     if (!id) throw badRequest('id wajib disertakan untuk update sales.');
 
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:K',
+      range: 'Sales!A:M',
     });
 
     const rows = response.data.values;
@@ -210,6 +239,9 @@ exports.updateSales = async (req, res, next) => {
       finalKilogram = oldRow[getColIdx(['kilogram', 'kg'])];
     }
 
+    const oldNoSelesInvoice = oldRow[getColIdx(['no seles invoice', 'no_seles_invoice', 'noselesinvoice'])] || '';
+    const oldNoDO = oldRow[getColIdx(['no do', 'no_do', 'nodo'])] || '';
+
     const updatedRow = [
       id,
       Deskripsi !== undefined ? Deskripsi : oldRow[getColIdx(['deskripsi'])],
@@ -222,6 +254,8 @@ exports.updateSales = async (req, res, next) => {
       finalPcs,
       finalPack,
       finalKilogram,
+      noSelesInvoice !== undefined ? noSelesInvoice : oldNoSelesInvoice,
+      noDO !== undefined ? noDO : oldNoDO,
     ];
 
     // Sinkron stok: kembalikan pengambilan lama, potong pengambilan baru
@@ -230,17 +264,26 @@ exports.updateSales = async (req, res, next) => {
     const newItem = updatedRow[1];
     const newQty = toNum(updatedRow[8]) + toNum(updatedRow[9]) + toNum(updatedRow[10]);
 
-    // Validasi stok dulu sebelum menulis
-    const stockPlan = await planStockChange(sheets, { oldItem, oldQty, newItem, newQty });
+    // Validasi stok dulu sebelum menulis.
+    // Jika barang diketik manual: tidak cek stok, langsung dimasukkan ke stok.
+    const manual = isManual(req.body);
+    const stockPlan = manual
+      ? null
+      : await planStockChange(sheets, { oldItem, oldQty, newItem, newQty });
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Sales!A${rowIndex}:K${rowIndex}`,
+      range: `Sales!A${rowIndex}:M${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [updatedRow] }
     });
 
-    await commitStockChange(sheets, stockPlan);
+    if (manual) {
+      const manualSatuan = satuan !== undefined ? satuan.trim().toLowerCase() : '';
+      await addManualStock(sheets, { nama: newItem, qty: newQty, satuan: manualSatuan, harga: updatedRow[4] });
+    } else {
+      await commitStockChange(sheets, stockPlan);
+    }
 
     res.json({ success: true, message: 'Data sales berhasil diperbarui!' });
   } catch (error) {
@@ -257,7 +300,7 @@ exports.deleteSales = async (req, res, next) => {
     const sheets = await getSheetClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sales!A:K',
+      range: 'Sales!A:M',
     });
 
     const rows = response.data.values;

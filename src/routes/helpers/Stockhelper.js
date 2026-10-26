@@ -75,6 +75,47 @@ async function commitStockChange(sheets, plan) {
   });
 }
 
+// Barang diketik manual: TANPA cek stok, langsung masuk ke Real_Stock.
+// - Jika nama barang sudah ada di stok -> PerPcs ditambah qty.
+// - Jika belum ada -> baris baru ditambahkan (PerPcs = qty).
+async function addManualStock(sheets, { nama, qty, satuan = '', harga = '' }) {
+  const item = (nama || '').toString().trim();
+  const q = toNum(qty);
+  if (!item || q <= 0) return;
+
+  const rows = await loadStockRows(sheets);
+  const cPcs = colIdx(rows, 'perpcs', 3);
+  const i = findStockIdx(rows, item);
+
+  if (i !== -1) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Real_Stock!${colLetter(cPcs)}${i + 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[toNum(rows[i][cPcs]) + q]] },
+    });
+    return;
+  }
+
+  // No_ID baru = max No_ID + 1
+  const cId = colIdx(rows, 'no_id', 0);
+  let maxId = 0;
+  for (let r = 1; r < rows.length; r++) {
+    const n = Number(rows[r][cId]);
+    if (!Number.isNaN(n) && n > maxId) maxId = n;
+  }
+
+  // A No_ID | B Nama_Barang | C Box | D PerPcs | E PerDus | F Harga | G Satuan | H Gambar
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: STOCK_RANGE,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: {
+      values: [[(maxId + 1).toString(), item, '', q, '', harga, satuan, '']],
+    },
+  });
+}
+
 // Ambil SEMUA data stock. hidden = true jika PerPcs <= 0, false jika PerPcs >= 1.
 async function readStock() {
   const sheets = await getSheetClient();
@@ -112,6 +153,7 @@ module.exports = {
   loadStockRows,
   planStockChange,
   commitStockChange,
+  addManualStock,
   readStock,
   salesRowQty,
 };
