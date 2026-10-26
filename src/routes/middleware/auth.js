@@ -39,7 +39,7 @@ const verifyToken = (req, res, next) => {
       });
     }
 
-    req.user = decoded; // { email, role, iat, exp }
+    req.user = decoded; // staff: { email, role, iat, exp } | customer: { nama, email, role, iat, exp }
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
@@ -47,6 +47,30 @@ const verifyToken = (req, res, next) => {
     }
     return res.status(401).json({ success: false, message: 'Token tidak valid.' });
   }
+};
+
+// ==========================================
+// TOKEN CUSTOMER (POP CHAT)
+// ==========================================
+// Payload hanya berisi nama & email. Role 'customer' tidak ada di MODULE_ROLES,
+// jadi token ini otomatis ditolak oleh checkModuleAccess / allowDeveloperAndAdmin.
+const CUSTOMER_TOKEN_EXPIRES_IN = '7d';
+
+const signCustomerToken = ({ nama, email }) =>
+  jwt.sign(
+    { nama, email: email.toLowerCase(), role: 'customer' },
+    JWT_SECRET,
+    { expiresIn: CUSTOMER_TOKEN_EXPIRES_IN }
+  );
+
+// Dipasang SETELAH verifyToken: hanya izinkan token customer
+const allowCustomer = (req, res, next) => {
+  if ((req.user?.role || '').toLowerCase() === 'customer') return next();
+
+  return res.status(403).json({
+    success: false,
+    message: 'Akses ditolak! Endpoint ini hanya untuk customer.',
+  });
 };
 
 // ==========================================
@@ -79,7 +103,8 @@ const allowDeveloperAndAdmin = (req, res, next) => {
 //   - /stock    -> Developer, Admin
 //   - /gudang   -> Gudang, Sales, Developer, Admin
 //   - /users    -> Developer, Admin
-//   - role lain (mis. karyawan) -> ditolak dari endpoint yang pakai middleware ini
+//   - /popchat  -> Developer, Admin, CS (balas chat customer)
+//   - role lain (mis. karyawan, customer) -> ditolak dari endpoint yang pakai middleware ini
 //
 // Mau tambah/ubah akses? Cukup edit tabel MODULE_ROLES di bawah.
 //
@@ -90,6 +115,7 @@ const MODULE_ROLES = {
   stock:   ['developer', 'admin'],
   gudang:  ['developer', 'admin', 'sales', 'gudang'],
   users:   ['developer', 'admin'],
+  popchat: ['developer', 'admin', 'cs'],
 };
 
 const checkModuleAccess = (moduleName) => (req, res, next) => {
@@ -106,4 +132,11 @@ const checkModuleAccess = (moduleName) => (req, res, next) => {
   });
 };
 
-module.exports = { verifyToken, allowDeveloperAndAdmin, checkModuleAccess, JWT_SECRET };
+module.exports = {
+  verifyToken,
+  allowDeveloperAndAdmin,
+  checkModuleAccess,
+  signCustomerToken,
+  allowCustomer,
+  JWT_SECRET,
+};
