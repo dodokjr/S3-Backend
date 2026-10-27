@@ -2,8 +2,6 @@ const { getSheetClient, SPREADSHEET_ID } = require('../../config/googleSheets');
 const { badRequest, notFound } = require('../Utils/Errors');
 const { STOCK_RANGE, loadStockRows, readStock } = require('../helpers/Stockhelper');
 
-// GET /stock: semua data dari database. PerPcs >= 1 -> hidden false, PerPcs <= 0 -> hidden true.
-// Opsional: /stock?hidden=false -> hanya barang yang masih ada (yang tampil)
 exports.getStock = async (req, res, next) => {
   try {
     let data = await readStock();

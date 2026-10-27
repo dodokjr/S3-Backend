@@ -1,18 +1,3 @@
-// ==========================================================
-// utils/errors.js
-// Satu file pusat untuk semua error HTTP (400, 401, 403, 404, 409, 500, 503).
-// Dipakai di SEMUA file route / middleware lewat: require('../utils/errors')
-//
-// Cara pakai di mana saja:
-//   const { badRequest, notFound, serviceUnavailable } = require('../utils/errors');
-//   if (!email) throw badRequest('Email wajib diisi!');
-//   if (!user)  throw notFound('User tidak ditemukan.');
-//
-// Di dalam handler async, tangkap lalu teruskan ke handler global:
-//   try { ... } catch (error) { next(error); }
-// atau bungkus dengan asyncHandler (tidak perlu try/catch lagi).
-// ==========================================================
-
 class AppError extends Error {
   constructor(status, message, code) {
     super(message);
@@ -42,27 +27,42 @@ const notFoundHandler = (req, res, next) => {
   next(notFound(`Route ${req.method} ${req.originalUrl} tidak ditemukan.`));
 };
 
+const NET_CODES = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ESOCKETTIMEDOUT'];
+const BUSY_STATUS = [429, 500, 502, 503, 504];
+
 // Ubah error dari library (Google Sheets, body-parser, jaringan) jadi AppError yang tepat
 function normalizeError(err) {
   if (err instanceof AppError) return err;
+  if (!err || typeof err !== 'object') return null;
 
-  // JSON body rusak (body-parser)
+  // JSON body rusak / terlalu besar (body-parser)
   if (err.type === 'entity.parse.failed') return badRequest('Format JSON tidak valid.');
   if (err.type === 'entity.too.large') return new AppError(413, 'Data terlalu besar.', 'PAYLOAD_TOO_LARGE');
 
-  // Google Sheets API: kuota habis / server Google bermasalah / jaringan putus -> 503
-  const gCode = Number(err.code || err.status || err.response?.status);
-  const netCodes = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ESOCKETTIMEDOUT'];
-  if ([429, 500, 502, 503, 504].includes(gCode) && err.response) {
-    return serviceUnavailable('Layanan Google Sheets sedang sibuk, coba lagi sebentar.');
-  }
-  if (netCodes.includes(err.code)) {
+  // Jaringan putus -> 503
+  if (NET_CODES.includes(err.code)) {
     return serviceUnavailable('Tidak dapat terhubung ke Google Sheets, coba lagi nanti.');
+  }
+
+  // Error dari API upstream (Google Sheets): ada err.response
+  if (err.response) {
+    const upstream = Number(err.code || err.status || err.response.status);
+    const reason = String(
+      err.errors?.[0]?.reason || err.response?.data?.error?.errors?.[0]?.reason || ''
+    );
+    // Kuota habis / Google bermasalah -> 503 (kuota Sheets kadang datang sebagai 403 rateLimitExceeded)
+    if (BUSY_STATUS.includes(upstream) || /ratelimit|quota/i.test(reason)) {
+      return serviceUnavailable('Layanan Google Sheets sedang sibuk, coba lagi sebentar.');
+    }
+    // 400/401/403/404 dari Google = masalah konfigurasi server, BUKAN kesalahan user.
+    // Jangan diteruskan apa adanya (bisa membocorkan detail & membuat frontend mengira sesi habis).
+    return null; // -> 500 generik
   }
 
   // Error lain yang membawa status HTTP valid (mis. dari middleware lain)
   const st = Number(err.status || err.statusCode);
-  if (st >= 400 && st < 600) return new AppError(st, err.message, 'ERROR');
+  if (st >= 400 && st < 500) return new AppError(st, err.message, 'ERROR');
+  if (st >= 500 && st < 600) return new AppError(st, 'Terjadi kesalahan pada server.', 'ERROR');
 
   return null; // bug tak terduga -> 500
 }
@@ -71,8 +71,6 @@ function normalizeError(err) {
 // Wajib 4 argumen supaya Express mengenalinya sebagai error handler.
 // eslint-disable-next-line no-unused-vars
 const errorHandler = (err, req, res, next) => {
-  if (res.headersSent) return next(err);
-
   const known = normalizeError(err);
   const status = known ? known.status : 500;
   const isProd = process.env.NODE_ENV === 'production';
@@ -80,10 +78,14 @@ const errorHandler = (err, req, res, next) => {
   // Log hanya error server (5xx); 4xx adalah kesalahan klien
   if (status >= 500) console.error(`[${status}] ${req.method} ${req.originalUrl}`, err);
 
+  // Respons sudah terkirim (mis. setelah timeout): jangan kirim lagi.
+  // Jika respons sudah selesai, cukup berhenti; jika masih streaming, serahkan ke Express (tutup koneksi).
+  if (res.headersSent) return res.writableEnded ? undefined : next(err);
+
   // Di production, pesan error 500 yang tak terduga disembunyikan dari klien
   const message = known
     ? known.message
-    : (isProd ? 'Terjadi kesalahan pada server.' : err.message);
+    : (isProd ? 'Terjadi kesalahan pada server.' : err?.message || 'Terjadi kesalahan pada server.');
 
   if (status === 503) res.set('Retry-After', '10');
 
@@ -91,7 +93,7 @@ const errorHandler = (err, req, res, next) => {
     success: false,
     message,
     ...(known?.code ? { code: known.code } : {}),
-    ...(!isProd && status >= 500 && err.stack ? { stack: err.stack } : {}),
+    ...(!isProd && status >= 500 && err?.stack ? { stack: err.stack } : {}),
   });
 };
 

@@ -1,18 +1,7 @@
 const { getSheetClient, SPREADSHEET_ID } = require('../../config/googleSheets');
 const { badRequest, notFound } = require('../Utils/Errors');
-// Sesuaikan path relatif ini dengan lokasi auth.js di projectmu
 const { signCustomerToken } = require('../../routes/middleware/auth');
 
-// ==========================================
-// POP CHAT MESSAGE <-> GOOGLE SHEETS
-// Sheet "PopChat" (A:I), baris 1 = header:
-// A no | B id | C key | D nama | E email | F pesan | G pengirim | H tgl | I reply_to
-//
-// - id        : id customer, 2 digit (01, 02, ...)
-// - key       : "S3" + id customer  (contoh: S301) = id room chat customer tsb
-// - pengirim  : "customer" (pesan utama) atau "cs" (balasan)
-// - reply_to  : khusus balasan CS, berisi "no" pesan customer yang dibalas
-// ==========================================
 const SHEET_NAME = 'PopChat';
 const RANGE = `${SHEET_NAME}!A:I`;
 const KEY_PREFIX = 'S3';
@@ -43,7 +32,6 @@ const rowToObj = (row = []) => ({
 async function loadChats(sheets) {
   const r = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: RANGE });
   const rows = r.data.values || [];
-  // simpan nomor baris sheet asli (header = baris 1) untuk keperluan hapus
   return rows
     .slice(1)
     .map((row, i) => ({ ...rowToObj(row), sheetRow: i + 2 }))
@@ -53,7 +41,6 @@ async function loadChats(sheets) {
 const nextNo = (chats) =>
   String(chats.reduce((max, c) => (Number(c.no) > max ? Number(c.no) : max), 0) + 1);
 
-// Format JSON balasan: { no, id, key, nama, email, pesan, pengirim, tgl, reply_to }
 const toReply = (c) => ({
   no: c.no,
   id: c.id,
@@ -66,8 +53,6 @@ const toReply = (c) => ({
   reply_to: c.reply_to,
 });
 
-// Susun thread: pesan utama customer (reply_to kosong) + SEMUA balasan di bawahnya
-// (balasan CS dan balasan customer ke CS), diurutkan berdasarkan "no".
 const buildThreads = (chats) => {
   const byNo = new Map(chats.map((c) => [c.no, c]));
 
@@ -133,8 +118,6 @@ const appendRow = (sheets, row) =>
     requestBody: { values: [row] },
   });
 
-// POST /popchat/token  (PUBLIK, tanpa verifyToken)
-// body: { nama, email } -> mengembalikan token customer (JWT berisi nama, email, role 'customer')
 exports.createCustomerToken = async (req, res, next) => {
   try {
     const nama = str(req.body.nama);
@@ -155,9 +138,6 @@ exports.createCustomerToken = async (req, res, next) => {
   }
 };
 
-// GET /popchat            -> semua chat (staff)
-// GET /popchat?key=S301   -> chat milik 1 customer (staff)
-// Jika yang login customer -> otomatis hanya chat milik emailnya sendiri
 exports.getChats = async (req, res, next) => {
   try {
     const sheets = await getSheetClient();
@@ -180,9 +160,6 @@ exports.getChats = async (req, res, next) => {
   }
 };
 
-// POST /popchat : pesan baru dari customer (wajib token customer)
-// body: { pesan }  -> nama & email diambil dari token (req.user)
-// id customer: dipakai ulang jika email sudah pernah chat, selain itu dibuat baru (01, 02, ...)
 exports.createChat = async (req, res, next) => {
   try {
     // nama & email dari JWT (tidak bisa dipalsukan client)
@@ -220,10 +197,6 @@ exports.createChat = async (req, res, next) => {
   }
 };
 
-// POST /popchat/customer-reply : customer membalas pesan CS/admin/developer (wajib token customer)
-// body: { pesan, reply_to? }
-// reply_to = "no" balasan CS yang dibalas. Kosong -> membalas balasan CS terakhir di chat customer tsb.
-// nama & email diambil dari token.
 exports.customerReply = async (req, res, next) => {
   try {
     const nama = str(req.user.nama);
@@ -270,10 +243,6 @@ exports.customerReply = async (req, res, next) => {
   }
 };
 
-// POST /popchat/reply : balasan dari CS / admin / developer (staff)
-// body: { key, pesan, reply_to?, nama?, email? }
-// reply_to kosong -> membalas pesan customer terakhir pada key tersebut
-// (termasuk balasan customer ke CS, karena sama-sama pengirim 'customer')
 exports.replyChat = async (req, res, next) => {
   try {
     const key = str(req.body.key);
@@ -316,9 +285,6 @@ exports.replyChat = async (req, res, next) => {
   }
 };
 
-// DELETE /popchat (hanya developer & admin)
-// body: { no }  -> hapus 1 pesan beserta seluruh balasan di bawahnya
-// body: { key } -> hapus seluruh chat milik key tersebut
 exports.deleteChat = async (req, res, next) => {
   try {
     const no = str(req.body.no);

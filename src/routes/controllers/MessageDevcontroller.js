@@ -36,8 +36,6 @@ const colIndex = (headers, ...names) => {
 
 const colLetter = (i) => String.fromCharCode(65 + i); // cukup untuk < 26 kolom
 
-// Pastikan sheet "Messages" ada (dibuat otomatis kalau belum ada) dan punya kolom status.
-// Dicek sekali per proses.
 let sheetReady = false;
 const ensureSheet = async (sheets) => {
   if (sheetReady) return;
@@ -49,7 +47,6 @@ const ensureSheet = async (sheets) => {
       requestBody: { requests: [{ addSheet: { properties: { title: SHEET_NAME } } }] },
     });
   } else {
-    // Sheet lama belum punya kolom status -> tambahkan header di kolom berikutnya
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${SHEET_NAME}!1:1`,
@@ -67,8 +64,6 @@ const ensureSheet = async (sheets) => {
   sheetReady = true;
 };
 
-// Terima array ["developer"] / ["@semidev"] atau string "developer,semidev".
-// Hasilnya selalu array id tanpa "@", tanpa duplikat, dan hanya user yang diizinkan.
 const normalizeTags = (input) => {
   const list = Array.isArray(input) ? input : (input || '').toString().split(',');
   const tags = [
@@ -87,7 +82,6 @@ const normalizeTags = (input) => {
   return tags;
 };
 
-// Terima alias (Indonesia/Inggris), hasilnya salah satu dari ALLOWED_STATUS.
 const normalizeStatus = (input) => {
   const key = (input || '').toString().trim().toLowerCase();
   const status = STATUS_ALIAS[key];
@@ -97,7 +91,6 @@ const normalizeStatus = (input) => {
   return status;
 };
 
-// Cari nama & email dari sheet Users berdasarkan email di token
 const findUserByEmail = async (sheets, email) => {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
@@ -118,10 +111,6 @@ const findUserByEmail = async (sheets, email) => {
   return { nama: row[idxName] || '', email: row[idxEmail] || email };
 };
 
-// Kirim pesan baru (semua user yang sudah punya token / login).
-// Body: { pesan: "...", tags: ["developer", "semidev"] }  (alias: message, tag)
-// Nama & email TIDAK dikirim dari client, diambil dari sheet Users berdasarkan token.
-// Status awal selalu "unread" (belum dibaca).
 exports.createMessage = async (req, res, next) => {
   try {
     const pesan = (req.body.pesan ?? req.body.message ?? '').toString().trim();
@@ -200,9 +189,7 @@ exports.createMessage = async (req, res, next) => {
   }
 };
 
-// Ambil pesan (semua user yang punya token).
-// admin & developer melihat semua pesan; role lain hanya pesan miliknya (match email).
-// Query opsional: ?tag=developer&status=pending
+
 exports.getMessages = async (req, res, next) => {
   try {
     const sheets = await getSheetClient();
@@ -259,8 +246,6 @@ exports.getMessages = async (req, res, next) => {
   }
 };
 
-// Ubah status pesan. Hanya admin & developer.
-// PATCH /messages/:id/status   Body: { status: "read" | "pending" | "success" | "unread" }
 exports.updateMessageStatus = async (req, res, next) => {
   try {
     const role = (req.user?.role || '').toString().toLowerCase();

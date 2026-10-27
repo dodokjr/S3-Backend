@@ -68,9 +68,6 @@ router.post('/signin', async (req, res) => {
       const isIdentifierMatch = (dbEmail.toLowerCase() === identifier.toLowerCase()) ||
                                 (dbName.toLowerCase() === identifier.toLowerCase());
 
-      // CATATAN: password masih dibandingkan sebagai plaintext di sini.
-      // Ini di luar cakupan perubahan kali ini — beri tahu saya kalau
-      // mau saya lanjutkan dengan migrasi ke bcrypt juga.
       if (isIdentifierMatch && dbPassword === password) {
         matchedUser = userObj;
         rowIndex = i + 2;
@@ -104,11 +101,6 @@ router.post('/signin', async (req, res) => {
       });
     }
 
-    // ==========================================
-    // CEK SESI GANDA: tolak login kalau akun sedang aktif (is_login TRUE / 1)
-    // ==========================================
-    // Dicek SETELAH password terverifikasi, supaya orang yang tidak punya
-    // password tidak bisa mengetahui status login akun tertentu.
     const statusColIndex = headers.findIndex(h => STATUS_HEADERS.includes(h.trim().toLowerCase()));
     const currentStatusValue = statusColIndex !== -1 ? (dataRows[rowIndex - 2][statusColIndex] || '') : '';
 

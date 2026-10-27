@@ -4,18 +4,9 @@ const { OFFICIAL_DEV_EMAIL } = require('../../config/googleSheets');
 const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET) {
-  // Gagal cepat saat startup daripada diam-diam menandatangani token dengan
-  // secret undefined (yang bisa ditebak/dipalsukan siapa pun).
   throw new Error('JWT_SECRET belum diset di environment variables!');
 }
 
-// ==========================================
-// MIDDLEWARE: VERIFIKASI TOKEN JWT
-// ==========================================
-// Membaca token dari header "Authorization: Bearer <token>", memverifikasi
-// tanda tangannya, lalu menaruh payload yang sudah tervalidasi di req.user.
-// Role di sini TIDAK BISA dipalsukan oleh client, karena token hanya bisa
-// dibuat oleh server saat signin (menggunakan JWT_SECRET yang hanya diketahui server).
 const verifyToken = (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'] || '';
@@ -28,10 +19,7 @@ const verifyToken = (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET); // throws jika invalid/expired
-
-    // Lapisan pertahanan tambahan: kalau token mengklaim role 'developer',
-    // pastikan emailnya tetap cocok dengan email developer resmi.
+    const decoded = jwt.verify(token, JWT_SECRET); 
     if (decoded.role === 'developer' && decoded.email !== OFFICIAL_DEV_EMAIL.toLowerCase()) {
       return res.status(403).json({
         success: false,
@@ -49,11 +37,6 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// ==========================================
-// TOKEN CUSTOMER (POP CHAT)
-// ==========================================
-// Payload hanya berisi nama & email. Role 'customer' tidak ada di MODULE_ROLES,
-// jadi token ini otomatis ditolak oleh checkModuleAccess / allowDeveloperAndAdmin.
 const CUSTOMER_TOKEN_EXPIRES_IN = '7d';
 
 const signCustomerToken = ({ nama, email }) =>
@@ -73,11 +56,6 @@ const allowCustomer = (req, res, next) => {
   });
 };
 
-// ==========================================
-// MIDDLEWARE: HAK AKSES DEVELOPER & ADMIN
-// ==========================================
-// Dipasang SETELAH verifyToken. Mengecek req.user.role yang sudah tervalidasi
-// dari JWT, bukan dari header/body yang bisa diedit bebas oleh client.
 const allowDeveloperAndAdmin = (req, res, next) => {
   const role = (req.user?.role || '').toLowerCase();
 
