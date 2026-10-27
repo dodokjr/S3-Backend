@@ -15,18 +15,28 @@ const isProd = process.env.NODE_ENV === 'production';
 // CORS (dipasang PALING AWAL supaya preflight OPTIONS tidak kena rate limit
 // dan respons 429/error tetap membawa header CORS)
 // ==========================================
+// Bersihkan format .env: buang spasi, kutip, kurung, dan garis miring di akhir
+const cleanOrigin = (o) =>
+  o.trim().replace(/^[\s"'{[]+|[\s"'}\]]+$/g, '').replace(/\/+$/, '');
+
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
-  .split(',').map((o) => o.trim()).filter(Boolean);
+  .split(',').map(cleanOrigin).filter(Boolean);
 
 if (!allowedOrigins.length && isProd) {
   console.warn('PERINGATAN: CORS_ORIGIN kosong di production, request lintas-origin ditolak.');
 }
 
 app.use(cors({
-  // Dev: izinkan semua. Production tanpa CORS_ORIGIN: tolak lintas-origin (fail-closed).
-  origin: allowedOrigins.length ? allowedOrigins : !isProd,
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);                            // Postman/curl/server-ke-server
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    if (!allowedOrigins.length && !isProd) return cb(null, true);  // dev tanpa CORS_ORIGIN
+    console.warn(`CORS ditolak: origin="${origin}" | diizinkan=${JSON.stringify(allowedOrigins)}`);
+    return cb(null, false);
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  // credentials: true, // aktifkan HANYA jika frontend memakai cookie / withCredentials
   maxAge: 600,
 }));
 
